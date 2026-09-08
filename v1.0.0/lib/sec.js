@@ -72,8 +72,8 @@ async function lookupTicker(ticker) {
 async function fetchSecCompany(ticker) {
   const company = await lookupTicker(ticker);
   const [facts, submissions] = await Promise.all([
-    cached(`facts-${company.cik}`, () => fetchJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${company.cik}.json`, { headers: SEC_HEADERS })),
-    cached(`submissions-${company.cik}`, () => fetchJson(`https://data.sec.gov/submissions/CIK${company.cik}.json`, { headers: SEC_HEADERS }))
+    fetchJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${company.cik}.json`, { headers: SEC_HEADERS }),
+    fetchJson(`https://data.sec.gov/submissions/CIK${company.cik}.json`, { headers: SEC_HEADERS })
   ]);
   return { company, facts, submissions };
 }
