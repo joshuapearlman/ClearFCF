@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Clear FCF Screener | Founded & Developed by Joshua Pearlman</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/audit.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand-group">
+      <a class="brand" href="#">Clear<span>FCF</span></a>
+      <span class="brand-badge">v1.1</span>
+      <span class="author-credit">Developed by <strong>Joshua Pearlman</strong></span>
+    </div>
+    <nav aria-label="Primary" class="nav-bar">
+      <button class="nav-button active" data-view="ideas">Idea Finder</button>
+      <button class="nav-button" data-view="screen">Watchlist</button>
+      <button class="nav-button" data-view="analyze">Single Stock</button>
+    </nav>
+  </header>
+
+  <main class="app-main">
+    <div id="status" class="status-bar" role="status" aria-live="polite">Ready.</div>
+
+    <!-- VIEW 1: IDEA FINDER -->
+    <section id="ideas" class="view active">
+      <div class="control-deck">
+        <div class="control-row">
+          <div class="ctrl">
+            <label for="universe-select">Universe</label>
+            <select id="universe-select">
+              <option value="yahoo" selected>Yahoo Discovery (Changing)</option>
+              <option value="sp500">S&P 500 (Large Cap)</option>
+              <option value="midcap">S&P 400 (Mid Cap)</option>
+              <option value="smallcap">Small-Cap Value (~500+)</option>
+              <option value="sec_all">Full SEC Universe (~4,000+)</option>
+            </select>
+          </div>
+          <div class="ctrl">
+            <label for="target">Target Ideas</label>
+            <select id="target">
+              <option>10</option>
+              <option selected>25</option>
+              <option>50</option>
+              <option>250</option>
+            </select>
+          </div>
+          <div class="ctrl">
+            <label for="max-examine">Max Examine</label>
+            <select id="max-examine">
+              <option>100</option>
+              <option>300</option>
+              <option>500</option>
+              <option>1000</option>
+              <option selected>5000</option>
+            </select>
+          </div>
+          <div class="ctrl-btn-group">
+            <button id="find-button" class="btn btn-primary">Start Screen</button>
+            <button id="stop-button" class="btn btn-secondary" disabled>Stop</button>
+          </div>
+        </div>
+
+        <div class="filter-row">
+          <div class="filter-chips" id="filter-chips">
+            <span class="chips-label">Filters:</span>
+            <button type="button" class="chip" data-filter="net-cash">💰 Net Cash Only</button>
+            <button type="button" class="chip" data-filter="low-sbc">📉 Low SBC (&lt; 15% FCF)</button>
+            <button type="button" class="chip" data-filter="buybacks">🔄 Buybacks (&lt; 0% Dilution)</button>
+            <button type="button" class="chip" data-filter="sub-10">🏷️ Deep Value (&lt; 10x FCF)</button>
+            <button type="button" class="chip chip-clear hidden" id="clear-chips">✕ Clear</button>
+          </div>
+          <div class="seen-toggle">
+            <label class="checkbox-label"><input type="checkbox" id="skip-seen" checked> Skip reviewed</label>
+            <span id="seen-count-badge" class="history-badge">Hiding 0 stocks • <button id="reset-seen-btn" type="button" class="text-link">Reset</button></span>
+          </div>
+        </div>
+      </div>
+
+      <div id="progress-wrap" class="progress-wrap hidden">
+        <div class="progress-track"><div id="progress-bar"></div></div>
+        <span id="progress-text" class="progress-text"></span>
+      </div>
+
+      <div id="idea-results"></div>
+    </section>
+
+    <!-- VIEW 2: WATCHLIST SCREENER -->
+    <section id="screen" class="view">
+      <div class="control-deck">
+        <form id="screen-form">
+          <textarea id="ticker-list" rows="3" placeholder="Paste tickers: AAPL, MSFT, GOOGL, AMZN, GM, DVN, OMC..."></textarea>
+          <button class="btn btn-primary" type="submit">Screen Tickers</button>
+        </form>
+      </div>
+      <div id="screen-results"></div>
+    </section>
+
+    <!-- VIEW 3: SINGLE STOCK ANALYSIS -->
+    <section id="analyze" class="view">
+      <div class="control-deck">
+        <form id="analyze-form" class="inline-search">
+          <input id="single-ticker" maxlength="12" placeholder="Enter Ticker (e.g. AAPL, OMC, GM)" autocomplete="off">
+          <button class="btn btn-primary" type="submit">Analyze</button>
+        </form>
+      </div>
+      <div id="report"></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-wrap">
+      <div><strong>ClearFCF</strong> • Founded & Developed by <strong>Joshua Pearlman</strong></div>
+      <div>SEC EDGAR Data &bull; Yahoo Pricing</div>
+    </div>
+  </footer>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>
