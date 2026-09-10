@@ -1,0 +1,46 @@
+.modal {
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: var(--surface);
+  padding: 2rem;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 800px;
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+}
+
+.close {
+  position: absolute;
+  top: 1rem; right: 1.5rem;
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+
+.audit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.audit-card {
+  background: #f8fafc;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.audit-card h3 { margin-top: 0; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+
+.warnings { margin-top: 2rem; background: #fef2f2; border: 1px solid #fecaca; padding: 1.5rem; border-radius: 6px; }
+.warnings h3 { color: var(--danger); margin-top: 0; }
