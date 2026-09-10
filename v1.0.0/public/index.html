@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Transparent normalized free-cash-flow stock idea screener.">
+  <title>Clear FCF Screener</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/audit.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="#">Clear<span>FCF</span></a>
+    <nav aria-label="Primary">
+      <button class="nav-button active" data-view="ideas">Idea Finder</button>
+      <button class="nav-button" data-view="screen">Paste Tickers</button>
+      <button class="nav-button" data-view="analyze">Analyze Stock</button>
+      <button class="nav-button" data-view="method">Method</button>
+    </nav>
+  </header>
+  <main>
+    <section class="hero">
+      <p class="eyebrow">IDEAS, NOT RECOMMENDATIONS</p>
+      <h1>Find cash-generative businesses<br><em>worth a closer look.</em></h1>
+      <p>Yahoo discovers a changing universe. SEC filings provide the evidence. Every normalized-FCF estimate shows its work.</p>
+    </section>
+    <div id="status" class="status" role="status" aria-live="polite">Ready.</div>
+    <section id="ideas" class="view active">
+            <div class="panel finder-panel">
+        <div>
+          <p class="kicker">AUTOMATIC IDEA FINDER</p>
+          <h2>Search markets for normalized FCF</h2>
+          <p class="muted">Scan curated index universes or the full SEC public directory. Filter out previously reviewed ideas to discover fresh bargains.</p>
+        </div>
+        <div class="finder-controls">
+          <label>Universe
+            <select id="universe-select">
+              <option value="yahoo" selected>Yahoo Discovery (Changing)</option>
+              <option value="sp500">S&P 500 (Large Cap)</option>
+              <option value="midcap">S&P 400 (Mid Cap)</option>
+              <option value="smallcap">Small-Cap Value (~1,000)</option>
+              <option value="sec_all">Full SEC Universe (~4,000+)</option>
+            </select>
+          </label>
+          <label>Ideas to find <select id="target"><option>10</option><option selected>25</option><option>50</option><option>250</option></select></label>
+          <label>Max to examine <select id="max-examine"><option>100</option><option>300</option><option>500</option><option>1000</option><option selected>5000</option></select></label>
+          <button id="find-button" class="primary">Find stocks</button>
+          <button id="stop-button" class="secondary" disabled>Stop</button>
+        </div>
+      </div>
+      <div class="seen-bar">
+        <label class="checkbox-label"><input type="checkbox" id="skip-seen" checked> Skip previously reviewed stocks</label>
+        <span id="seen-count-badge" class="seen-badge">Hiding 0 reviewed stocks • <button id="reset-seen-btn" type="button" class="text-link">Reset history</button></span>
+      </div>
+      <div id="progress-wrap" class="progress-wrap hidden"><div class="progress-track"><div id="progress-bar"></div></div><span id="progress-text"></span></div>
+      <div id="idea-results"></div>
+    </section>
+    <section id="screen" class="view">
+      <div class="panel">
+        <p class="kicker">YOUR WATCHLIST</p>
+        <h2>Paste up to 50 tickers</h2>
+        <form id="screen-form">
+          <label for="ticker-list">Separate tickers with commas, spaces, or new lines</label>
+          <textarea id="ticker-list" rows="5" placeholder="AAPL, MSFT, GOOGL, AMZN"></textarea>
+          <button class="primary" type="submit">Screen tickers</button>
+        </form>
+      </div>
+      <div id="screen-results"></div>
+    </section>
+    <section id="analyze" class="view">
+      <div class="panel compact-panel">
+        <div><p class="kicker">COMPANY REPORT</p><h2>Analyze one stock</h2></div>
+        <form id="analyze-form" class="inline-form">
+          <label class="sr-only" for="single-ticker">Ticker</label>
+          <input id="single-ticker" maxlength="12" placeholder="AAPL" autocomplete="off">
+          <button class="primary" type="submit">Analyze</button>
+        </form>
+      </div>
+      <div id="report"></div>
+    </section>
+    <section id="method" class="view">
+      <div class="panel prose">
+        <p class="kicker">TRANSPARENT BY DESIGN</p>
+        <h2>How normalized FCF is calculated</h2>
+        <div class="method-grid">
+          <article><span>01</span><h3>Operational CapEx</h3><p>Operating cash flow minus tangible property, plant & equipment purchases and routine capitalized software/intangibles.</p></article>
+          <article><span>02</span><h3>Economic FCF (post-SBC)</h3><p>Standard FCF minus Stock-Based Compensation, treating equity issuance as a true operational labor expense.</p></article>
+          <article><span>03</span><h3>50/50 Margin Blending</h3><p>Combines simple average annual margin and aggregate volume-weighted margin equally to protect against both small-year skews and scaling shifts.</p></article>
+          <article><span>04</span><h3>Unlevered EV Multiple</h3><p>Enterprise Value is compared to Unlevered Normalized FCF (adding back after-tax net interest) to provide an apples-to-apples firm valuation.</p></article>
+        </div>
+        <p class="notice">Banks and insurers are excluded because conventional FCF is not an appropriate primary valuation method for them.</p>
+        <p class="notice">Near-term solvency is actively verified: companies where short-term debt due within 12 months exceeds available cash plus annual cash flow are disqualified to protect against sudden refinancing cliffs.</p>
+      </div>
+    </section>
+  </main>
+  <footer>
+    <div class="footer-brand">
+      <span>ClearFCF</span>
+      <span class="creator-credit">Created by <strong>Joshua Pearlman</strong></span>
+    </div>
+    <p>Research aid only. Verify all figures in original filings before making an investment decision.</p>
+  </footer>
+  <script src="/app.js" defer></script>
+</body>
+</html>
