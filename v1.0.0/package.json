@@ -5,7 +5,7 @@
   "description": "Transparent normalized free-cash-flow stock screener for Vercel",
   "main": "server.js",
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "scripts": {
     "test": "node --test",
