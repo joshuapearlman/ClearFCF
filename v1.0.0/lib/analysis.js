@@ -30,6 +30,10 @@ function annualRows(extracted) {
     const interest = valueForYear(extracted.series.interestExpense, year);
     const sbc = valueForYear(extracted.series.sbc, year);
     const shares = valueForYear(extracted.series.dilutedShares, year);
+    const buybackCashRaw = valueForYear(extracted.series.buybackCash, year);
+    const buybackSharesRaw = valueForYear(extracted.series.buybackShares, year);
+    const buybackCash = finite(buybackCashRaw) ? Math.abs(buybackCashRaw) : null;
+    const buybackShares = finite(buybackSharesRaw) ? Math.abs(buybackSharesRaw) : null;
 
     const fcf = finite(ocf) && finite(capex) ? ocf - capex : null;
     const fcfEconomic = finite(fcf) ? fcf - (finite(sbc) ? sbc : 0) : null;
@@ -38,6 +42,8 @@ function annualRows(extracted) {
       year, revenue, ocf, capex, capexTangible, capexIntangible, dna, interest, sbc, shares,
       fcf,
       fcfEconomic,
+      buybackCash,
+      buybackShares,
       fcfMargin: finite(fcf) && finite(revenue) && revenue > 0 ? fcf / revenue : null,
       fcfEconomicMargin: finite(fcfEconomic) && finite(revenue) && revenue > 0 ? fcfEconomic / revenue : null,
       sbcToRevenue: finite(sbc) && finite(revenue) && revenue > 0 ? sbc / revenue : null,
@@ -158,7 +164,7 @@ function debtValue(latest) {
   return null;
 }
 
-function computeQuality(rows, normalized) {
+function computeQuality(rows, normalized, currentPrice = null) {
   const usable = rows.filter((row) => finite(row.fcf) && finite(row.revenue) && row.revenue > 0);
   const positiveYears = usable.filter((row) => row.fcf > 0).length;
   const margins = usable.map((row) => row.fcfMargin);
@@ -180,7 +186,52 @@ function computeQuality(rows, normalized) {
   const totalDna = usable.reduce((sum, r) => sum + (r.dna || 0), 0);
   const capexToDnaRatio = totalDna > 0 ? totalCapex / totalDna : null;
 
+  // 1. Share Buyback Capital Allocation Audit
+  const totalBuybackCash = rows.reduce((sum, r) => sum + (finite(r.buybackCash) ? Math.abs(r.buybackCash) : 0), 0);
+  const totalBuybackShares = rows.reduce((sum, r) => sum + (finite(r.buybackShares) ? Math.abs(r.buybackShares) : 0), 0);
+  const averageBuybackPrice = totalBuybackShares > 0 && totalBuybackCash > 0 ? totalBuybackCash / totalBuybackShares : null;
+  let buybackAllocationRating = "No Buybacks";
+  let buybackPriceVsCurrent = null;
+  if (finite(averageBuybackPrice)) {
+    if (finite(currentPrice) && currentPrice > 0) {
+      buybackPriceVsCurrent = averageBuybackPrice / currentPrice;
+      if (buybackPriceVsCurrent <= 0.85) {
+        buybackAllocationRating = "Accretive";
+      } else if (buybackPriceVsCurrent >= 1.25) {
+        buybackAllocationRating = "Value Destructive";
+      } else {
+        buybackAllocationRating = "Neutral";
+      }
+    } else {
+      buybackAllocationRating = "Active";
+    }
+  }
+
+  // 2. FCF Trajectory & Multi-Year Trend Detection
+  let fcfTrajectory = "Stable";
+  let recent3yAvgMargin = null;
+  let baselineMargin = null;
+  let marginSlope = null;
+  if (usable.length >= 3) {
+    const recent3 = usable.slice(0, 3);
+    recent3yAvgMargin = recent3.reduce((sum, r) => sum + r.fcfMargin, 0) / recent3.length;
+    const baseline = usable.length >= 5 ? usable.slice(2, 5) : usable.slice(1);
+    baselineMargin = baseline.length ? baseline.reduce((sum, r) => sum + r.fcfMargin, 0) / baseline.length : recent3yAvgMargin;
+    marginSlope = recent3yAvgMargin - baselineMargin;
+
+    const recentAvgFcf = recent3.reduce((sum, r) => sum + r.fcf, 0) / recent3.length;
+    const baselineFcf = baseline.length ? baseline.reduce((sum, r) => sum + r.fcf, 0) / baseline.length : recentAvgFcf;
+    const fcfChange = baselineFcf > 0 ? (recentAvgFcf - baselineFcf) / baselineFcf : 0;
+
+    if (marginSlope >= 0.02 || fcfChange >= 0.20) {
+      fcfTrajectory = "Expanding";
+    } else if (marginSlope <= -0.03 || fcfChange <= -0.25) {
+      fcfTrajectory = "Deteriorating";
+    }
+  }
+
   const reliability = normalized.usableYears < 6 ? "Insufficient" : positiveYears / usable.length >= 0.8 && standardDeviation(margins) <= 0.08 ? "High" : positiveYears / usable.length >= 0.67 ? "Medium" : "Low";
+
   return {
     reliability,
     positiveFcfYears: positiveYears,
@@ -189,7 +240,18 @@ function computeQuality(rows, normalized) {
     shareChange: dilution,
     latestSbcToRevenue: latestSbc?.sbcToRevenue ?? null,
     latestSbcToFcf: latestSbc?.sbcToFcf ?? null,
-    capexToDnaRatio
+    capexToDnaRatio,
+    buybackAudit: {
+      totalCashSpent: totalBuybackCash,
+      totalSharesRepurchased: totalBuybackShares,
+      averageBuybackPrice,
+      buybackPriceVsCurrent,
+      rating: buybackAllocationRating
+    },
+    fcfTrajectory,
+    recent3yAvgMargin,
+    baselineMargin,
+    marginSlope
   };
 }
 
@@ -223,13 +285,31 @@ async function analyzeTicker(rawTicker, options = {}) {
   const extracted = extractFinancials(facts);
   const rows = annualRows(extracted);
   const normalized = normalize(rows);
-  const quality = computeQuality(rows, normalized);
   const sic = Number(submissions.sic);
   const isFinancial = finite(sic) && sic >= 6000 && sic <= 6799;
   const hasUsdQuote = !quoteResult.currency || quoteResult.currency === "USD";
   const shareSelection = selectValuationShares(rows, extracted.latest.sharesOutstanding);
   const shares = shareSelection.shares;
   const price = finite(Number(options.price)) ? Number(options.price) : quoteResult.price;
+  const quality = computeQuality(rows, normalized, price);
+  const latestRow = rows[0] || {};
+  const ttm = {
+    period: "TTM",
+    year: "TTM",
+    revenue: latestRow.revenue,
+    ocf: latestRow.ocf,
+    capex: latestRow.capex,
+    capexTangible: latestRow.capexTangible,
+    capexIntangible: latestRow.capexIntangible,
+    fcf: latestRow.fcf,
+    sbc: latestRow.sbc,
+    fcfEconomic: latestRow.fcfEconomic,
+    dna: latestRow.dna,
+    shares: shares,
+    fcfMargin: latestRow.fcfMargin,
+    fcfEconomicMargin: latestRow.fcfEconomicMargin,
+    isTtm: true
+  };
   const suppliedMarketCap = finite(Number(options.marketCap)) && Number(options.marketCap) > 0 ? Number(options.marketCap) : null;
   const marketCap = suppliedMarketCap ?? (finite(price) && finite(shares) ? price * shares : null);
   const marketCapSource = suppliedMarketCap ? "Yahoo screener market cap" : finite(marketCap) ? `${shareSelection.source} × current price` : "Unavailable";
@@ -286,6 +366,15 @@ async function analyzeTicker(rawTicker, options = {}) {
     warnings.push(`Low CapEx relative to D&A (${round(quality.capexToDnaRatio * 100, 0)}%): evaluate whether the business is asset-light (normal) or deferring capital maintenance.`);
   }
 
+  // Trajectory warning
+  if (quality.fcfTrajectory === "Deteriorating") {
+    warnings.push(`Deteriorating FCF trend: Recent 3-year average margin (${round(quality.recent3yAvgMargin * 100, 1)}%) has contracted compared to earlier baseline (${round(quality.baselineMargin * 100, 1)}%).`);
+  }
+  // Buyback capital allocation warning
+  if (quality.buybackAudit?.rating === "Value Destructive") {
+    warnings.push(`Historical buybacks appear destructive: Average repurchase price ($${round(quality.buybackAudit.averageBuybackPrice, 2)}) is significantly above current market price ($${round(price, 2)}).`);
+  }
+
   // SBC Burden check
   if (quality.latestSbcToFcf && quality.latestSbcToFcf > 0.25) {
     warnings.push(`Heavy SBC burden: Stock-based compensation absorbs ${round(quality.latestSbcToFcf * 100, 0)}% of reported annual FCF.`);
@@ -324,6 +413,7 @@ async function analyzeTicker(rawTicker, options = {}) {
     company: { sic: submissions.sic || null, sicDescription: submissions.sicDescription || null, fiscalYearEnd: submissions.fiscalYearEnd || null, exchanges: submissions.exchanges || [], tickers: submissions.tickers || [] },
     quote: quoteResult,
     rows,
+    ttm,
     normalized,
     quality,
     valuation,
@@ -382,6 +472,10 @@ function summary(report) {
     reliability: report.quality.reliability,
     positiveFcfRatio: round(report.quality.positiveFcfRatio, 4),
     capexToDnaRatio: round(report.quality.capexToDnaRatio, 2),
+    fcfTrajectory: report.quality.fcfTrajectory,
+    marginSlope: round(report.quality.marginSlope, 4),
+    buybackPrice: round(report.quality.buybackAudit?.averageBuybackPrice, 2),
+    buybackRating: report.quality.buybackAudit?.rating || "N/A",
     netDebtToNfcf: round(report.valuation.netDebtToNfcf),
     shortDebt: round(report.valuation.shortDebt),
     cash: round(report.valuation.cash),

@@ -38,9 +38,22 @@ const TAGS = {
   dilutedShares: ["WeightedAverageNumberOfDilutedSharesOutstanding", "WeightedAverageNumberOfSharesOutstandingBasicAndDiluted"],
   sharesOutstanding: ["EntityCommonStockSharesOutstanding", "CommonStockSharesOutstanding"],
   cash: ["CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents", "CashCashEquivalentsAndShortTermInvestments"],
-  totalDebt: ["LongTermDebtAndFinanceLeaseObligations", "DebtAndFinanceLeaseObligations", "LongTermDebtAndCapitalLeaseObligations"],
-  shortDebt: ["ShortTermBorrowings", "ShortTermDebt", "DebtCurrent", "LongTermDebtCurrent"],
-  longDebt: ["LongTermDebtNoncurrent", "LongTermDebtAndFinanceLeaseObligationsNoncurrent"]
+  totalDebt: [
+    "LongTermDebtAndFinanceLeaseObligations", "DebtAndFinanceLeaseObligations", "LongTermDebtAndCapitalLeaseObligations",
+    "LongTermDebt", "SeniorNotes", "NotesPayable", "CommercialPaper", "LinesOfCredit"
+  ],
+  shortDebt: [
+    "ShortTermBorrowings", "ShortTermDebt", "DebtCurrent", "LongTermDebtCurrent", "NotesPayableCurrent", "CommercialPaper"
+  ],
+  longDebt: [
+    "LongTermDebtNoncurrent", "LongTermDebtAndFinanceLeaseObligationsNoncurrent", "SeniorNotesNoncurrent"
+  ],
+  buybackCash: [
+    "PaymentsForRepurchaseOfCommonStock", "PaymentsForRepurchaseOfEquity", "PaymentsForRepurchaseOfStock"
+  ],
+  buybackShares: [
+    "StockRepurchasedAndRetiredDuringPeriodShares", "TreasuryStockSharesAcquired", "StockRepurchasedDuringPeriodShares"
+  ]
 };
 
 async function cached(key, loader) {
@@ -146,7 +159,7 @@ function latestInstant(facts, tags) {
 
 function extractFinancials(facts) {
   const series = {};
-  for (const key of ["revenue", "ocf", "capex", "intangibleCapex", "dna", "interestExpense", "sbc", "dilutedShares"]) {
+  for (const key of ["revenue", "ocf", "capex", "intangibleCapex", "dna", "interestExpense", "sbc", "dilutedShares", "buybackCash", "buybackShares"]) {
     series[key] = bestAnnualSeries(facts, TAGS[key]);
   }
   const cash = latestInstant(facts, TAGS.cash);

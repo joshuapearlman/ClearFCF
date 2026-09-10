@@ -84,3 +84,30 @@ test("under-investment check flags CapEx well below Depreciation", () => {
   assert.ok(quality.capexToDnaRatio < 0.75);
   assert.equal(quality.capexToDnaRatio, 1 / 3);
 });
+
+test("buyback allocation audit correctly computes average buyback price and accretive rating", () => {
+  const rows = [
+    { fcf: 100, revenue: 1000, buybackCash: 50_000_000, buybackShares: 1_000_000, shares: 10_000_000, fcfMargin: 0.1 },
+    { fcf: 100, revenue: 1000, buybackCash: 50_000_000, buybackShares: 1_000_000, shares: 11_000_000, fcfMargin: 0.1 }
+  ];
+  // Total cash = 100M, total shares = 2M -> avg buyback price = $50
+  // Current price = $70 -> 50 / 70 = ~0.714 (<= 0.85 -> Accretive)
+  const quality = computeQuality(rows, { usableYears: 6 }, 70);
+  assert.equal(quality.buybackAudit.totalCashSpent, 100_000_000);
+  assert.equal(quality.buybackAudit.totalSharesRepurchased, 2_000_000);
+  assert.equal(quality.buybackAudit.averageBuybackPrice, 50);
+  assert.equal(quality.buybackAudit.rating, "Accretive");
+});
+
+test("FCF trajectory detects deteriorating margin trend", () => {
+  const rows = [
+    { year: 2025, fcf: 50, revenue: 1000, fcfMargin: 0.05, shares: 100 },
+    { year: 2024, fcf: 50, revenue: 1000, fcfMargin: 0.05, shares: 100 },
+    { year: 2023, fcf: 60, revenue: 1000, fcfMargin: 0.06, shares: 100 }, // recent 3y avg margin = 5.33%
+    { year: 2022, fcf: 150, revenue: 1000, fcfMargin: 0.15, shares: 100 },
+    { year: 2021, fcf: 160, revenue: 1000, fcfMargin: 0.16, shares: 100 },
+    { year: 2020, fcf: 150, revenue: 1000, fcfMargin: 0.15, shares: 100 }  // baseline avg margin = ~15.33%
+  ];
+  const quality = computeQuality(rows, { usableYears: 6 }, 50);
+  assert.equal(quality.fcfTrajectory, "Deteriorating");
+});
