@@ -707,7 +707,7 @@ async function runAuto() {
         await new Promise((r) => setTimeout(r, 2500));
       } else {
         setStatus(`Auto Finder: examined ${scan.cursor} and found ${scan.results.length} ideas.`);
-        await new Promise((r) => setTimeout(r, 350));
+        await new Promise((r) => setTimeout(r, 200));
       }
     }
     scan.complete = scan.cursor >= max;
