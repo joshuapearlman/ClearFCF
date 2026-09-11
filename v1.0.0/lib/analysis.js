@@ -96,7 +96,7 @@ function normalize(rows, maxYears = null) {
   // Allow margin agreement if gap <= 25%, OR if margins are structurally expanding (recent 3y avg >= median)
   const recentUsable = usable.slice(0, Math.min(3, usable.length));
   const recentAvgMargin = recentUsable.reduce((sum, r) => sum + r.fcfMargin, 0) / recentUsable.length;
-  const isExpanding = finite(recentAvgMargin) && finite(medianMargin) && recentAvgMargin >= medianMargin;
+  const isExpanding = finite(recentAvgMargin) && finite(medianMargin) && (recentAvgMargin - medianMargin) >= 0.015;
   const marginAgreement = (finite(averageMedianGap) && averageMedianGap <= 0.25) || isExpanding;
 
   // Outlier detection via MAD
@@ -223,10 +223,11 @@ function computeQuality(rows, normalized, currentPrice = null) {
   let recent3yAvgMargin = null;
   let baselineMargin = null;
   let marginSlope = null;
-  if (usable.length >= 3) {
+  if (usable.length >= 4) {
     const recent3 = usable.slice(0, 3);
     recent3yAvgMargin = recent3.reduce((sum, r) => sum + r.fcfMargin, 0) / recent3.length;
-    const baseline = usable.length >= 5 ? usable.slice(2, 5) : usable.slice(1);
+    // Disjoint baseline: Years 3 to 7 without overlapping Year 2
+    const baseline = usable.slice(3, Math.min(7, usable.length));
     baselineMargin = baseline.length ? baseline.reduce((sum, r) => sum + r.fcfMargin, 0) / baseline.length : recent3yAvgMargin;
     marginSlope = recent3yAvgMargin - baselineMargin;
 
@@ -423,8 +424,10 @@ async function analyzeTicker(rawTicker, options = {}) {
 
   // Solvency check: Near-term debt vs. liquidity
   const cashVal = cash || 0;
-  const annualCashGeneration = Math.max(0, normalized.latestReportedFcf || 0);
-  const immediateDebtRisk = shortDebt > 0 && shortDebt > (cashVal + annualCashGeneration);
+  const latestFcf = normalized.latestReportedFcf ?? 0;
+  // If company is burning cash (negative FCF), cash generation drains available liquidity
+  const netAnnualLiquidity = latestFcf;
+  const immediateDebtRisk = shortDebt > 0 && shortDebt > (cashVal + netAnnualLiquidity);
   if (immediateDebtRisk) {
     warnings.push(`High near-term debt maturity: Short-term debt ($${compactStr(shortDebt)}) exceeds cash ($${compactStr(cashVal)}) plus annual FCF ($${compactStr(annualCashGeneration)}).`);
   }
