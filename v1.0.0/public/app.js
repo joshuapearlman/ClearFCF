@@ -605,8 +605,7 @@ async function openReport(ticker) {
   $("#report").innerHTML = `<div class="panel">Loading <strong>${escapeHtml(ticker)}</strong>...</div>`;
   setStatus(`Loading the full ${ticker} report...`);
   try {
-    // Option A: Always fetch a fresh uncached report on click to guarantee live snapshot data
-    const report = await request(`/api/analyze?ticker=${encodeURIComponent(ticker)}&_t=${Date.now()}`);
+    const report = state.reports[ticker] || await request(`/api/analyze?ticker=${encodeURIComponent(ticker)}`);
     state.reports[ticker] = report;
     $("#report").innerHTML = renderReport(report);
 
@@ -693,7 +692,7 @@ async function runAuto() {
     scan.allExamined = scan.allExamined || [];
 
     while (scan.cursor < max && !state.stopped) {
-      const batchRows = scan.symbols.slice(scan.cursor, scan.cursor + 5);
+      const batchRows = scan.symbols.slice(scan.cursor, scan.cursor + 8);
       scan.cursor += batchRows.length;
       const unreviewedRows = batchRows.filter((item) => !reviewed.has(item.ticker));
       if (!unreviewedRows.length) {
@@ -733,7 +732,7 @@ async function runAuto() {
         await new Promise((r) => setTimeout(r, 2500));
       } else {
         setStatus(`Auto Finder: examined ${scan.cursor} and found ${scan.results.length} ideas.`);
-        await new Promise((r) => setTimeout(r, 400));
+        await new Promise((r) => setTimeout(r, 200));
       }
     }
     scan.complete = scan.cursor >= max;
