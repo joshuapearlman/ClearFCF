@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="100%" height="100%">
+  <defs>
+    <!-- Top Leaf Gradient: Electric Emerald to Vivid Mint -->
+    <linearGradient id="topGleam" x1="15%" y1="85%" x2="85%" y2="15%">
+      <stop offset="0%" stop-color="#00875a" />
+      <stop offset="35%" stop-color="#00a86b" />
+      <stop offset="70%" stop-color="#00d98b" />
+      <stop offset="100%" stop-color="#2bf4a8" />
+    </linearGradient>
+    <linearGradient id="topShadow" x1="20%" y1="10%" x2="80%" y2="90%">
+      <stop offset="0%" stop-color="#04563a" />
+      <stop offset="60%" stop-color="#013624" />
+      <stop offset="100%" stop-color="#001a11" />
+    </linearGradient>
+    <!-- Bottom Leaf Gradient: Rich Emerald to Forest -->
+    <linearGradient id="botGleam" x1="15%" y1="85%" x2="85%" y2="15%">
+      <stop offset="0%" stop-color="#015237" />
+      <stop offset="40%" stop-color="#008f5c" />
+      <stop offset="80%" stop-color="#00c982" />
+      <stop offset="100%" stop-color="#0ae698" />
+    </linearGradient>
+    <linearGradient id="botShadow" x1="20%" y1="10%" x2="80%" y2="90%">
+      <stop offset="0%" stop-color="#02422c" />
+      <stop offset="60%" stop-color="#012b1c" />
+      <stop offset="100%" stop-color="#00140d" />
+    </linearGradient>
+  </defs>
+
+  <!-- TOP LEAF SHAPE -->
+  <!-- Top surface -->
+  <path d="M 180 398 C 215 270 330 155 520 120 C 650 96 680 102 682 105 C 670 145 570 235 440 290 C 320 342 225 380 180 398 Z" fill="url(#topGleam)" />
+  <!-- Underside bevel / shade -->
+  <path d="M 180 398 C 225 378 335 330 455 275 C 575 220 655 145 682 105 C 610 240 450 310 320 348 C 240 372 195 390 180 398 Z" fill="url(#topShadow)" />
+
+  <!-- BOTTOM LEAF SHAPE -->
+  <!-- Top surface -->
+  <path d="M 168 560 C 205 435 320 335 515 308 C 650 288 690 300 692 308 C 675 350 565 445 430 488 C 310 528 215 548 168 560 Z" fill="url(#botGleam)" />
+  <!-- Underside bevel / shade -->
+  <path d="M 168 560 C 215 545 320 520 440 475 C 560 430 655 355 692 308 C 625 435 470 495 330 528 C 235 550 185 558 168 560 Z" fill="url(#botShadow)" />
+</svg>
