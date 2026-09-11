@@ -2,16 +2,84 @@
 
 const { fetchJson, clamp, finite } = require("./utils");
 
-const HEADERS = { "User-Agent": "Mozilla/5.0 ClearFCFScreener/1.0", Accept: "application/json" };
+const HEADERS = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", Accept: "*/*" };
 const SOURCES = [
   "undervalued_large_caps", "undervalued_growth_stocks", "day_losers",
   "most_actives", "aggressive_small_caps", "small_cap_gainers"
 ];
 
+let cachedCookie = null;
+let cachedCrumb = null;
+let authExpires = 0;
+
+async function getYahooAuth() {
+  if (cachedCookie && cachedCrumb && Date.now() < authExpires) {
+    return { cookie: cachedCookie, crumb: cachedCrumb };
+  }
+  try {
+    const res = await fetch("https://fc.yahoo.com", { headers: HEADERS });
+    const setCookie = res.headers.get("set-cookie");
+    if (setCookie) {
+      cachedCookie = setCookie.split(";")[0];
+      const crumbRes = await fetch("https://query1.finance.yahoo.com/v1/test/getcrumb", {
+        headers: { ...HEADERS, cookie: cachedCookie }
+      });
+      if (crumbRes.ok) {
+        cachedCrumb = (await crumbRes.text()).trim();
+        authExpires = Date.now() + 1800 * 1000; // 30 min cache
+        return { cookie: cachedCookie, crumb: cachedCrumb };
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
+
 async function fetchYahooQuote(ticker) {
   const symbol = encodeURIComponent(ticker);
 
-  // 1. Try v6 / v7 quote endpoints
+  // 1. Primary: quoteSummary with price, defaultKeyStatistics, and financialData (Live Balance Sheet Snapshot)
+  try {
+    const auth = await getYahooAuth();
+    const authHeaders = auth?.cookie ? { ...HEADERS, cookie: auth.cookie } : HEADERS;
+    const crumbStr = auth?.crumb ? `&crumb=${encodeURIComponent(auth.crumb)}` : "";
+    const summaryUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=price,defaultKeyStatistics,financialData${crumbStr}`;
+    const summaryData = await fetchJson(summaryUrl, { headers: authHeaders });
+    const pMod = summaryData?.quoteSummary?.result?.[0]?.price;
+    const sMod = summaryData?.quoteSummary?.result?.[0]?.defaultKeyStatistics;
+    const fMod = summaryData?.quoteSummary?.result?.[0]?.financialData;
+
+    const priceVal = pMod?.regularMarketPrice?.raw ?? pMod?.regularMarketPrice;
+    const mcVal = pMod?.marketCap?.raw ?? pMod?.marketCap;
+    const sharesVal = sMod?.sharesOutstanding?.raw ?? sMod?.sharesOutstanding;
+    const totalDebtVal = fMod?.totalDebt?.raw ?? (finite(fMod?.totalDebt) ? fMod?.totalDebt : null);
+    const totalCashVal = fMod?.totalCash?.raw ?? (finite(fMod?.totalCash) ? fMod?.totalCash : null);
+    const currentRatioVal = fMod?.currentRatio?.raw ?? (finite(fMod?.currentRatio) ? fMod?.currentRatio : null);
+    const quickRatioVal = fMod?.quickRatio?.raw ?? (finite(fMod?.quickRatio) ? fMod?.quickRatio : null);
+    const bookValueVal = sMod?.bookValue?.raw ?? (finite(sMod?.bookValue) ? sMod?.bookValue : null);
+    const evVal = sMod?.enterpriseValue?.raw ?? (finite(sMod?.enterpriseValue) ? sMod?.enterpriseValue : null);
+
+    if (finite(priceVal)) {
+      return {
+        price: priceVal,
+        marketCap: finite(mcVal) ? mcVal : null,
+        shares: finite(sharesVal) ? sharesVal : null,
+        totalDebt: finite(totalDebtVal) ? totalDebtVal : null,
+        totalCash: finite(totalCashVal) ? totalCashVal : null,
+        currentRatio: finite(currentRatioVal) ? currentRatioVal : null,
+        quickRatio: finite(quickRatioVal) ? quickRatioVal : null,
+        bookValue: finite(bookValueVal) ? bookValueVal : null,
+        enterpriseValue: finite(evVal) ? evVal : null,
+        currency: pMod?.currency || null,
+        exchange: pMod?.exchangeName || null,
+        instrumentType: pMod?.quoteType || null,
+        marketTime: pMod?.regularMarketTime ? new Date(pMod.regularMarketTime * 1000).toISOString() : null,
+        source: "Yahoo Finance live balance sheet & quote"
+      };
+    }
+  } catch (e) {}
+
+  // 2. Secondary fallback: v6 / v7 quote endpoints
   const quoteUrls = [
     `https://query2.finance.yahoo.com/v6/finance/quote?symbols=${symbol}`,
     `https://query1.finance.yahoo.com/v6/finance/quote?symbols=${symbol}`,
@@ -28,6 +96,12 @@ async function fetchYahooQuote(ticker) {
           price: q.regularMarketPrice,
           marketCap: finite(q.marketCap) ? q.marketCap : null,
           shares: finite(q.sharesOutstanding) ? q.sharesOutstanding : null,
+          totalDebt: null,
+          totalCash: null,
+          currentRatio: null,
+          quickRatio: null,
+          bookValue: null,
+          enterpriseValue: null,
           currency: q.currency || null,
           exchange: q.fullExchangeName || q.exchange || null,
           instrumentType: q.quoteType || null,
@@ -38,29 +112,7 @@ async function fetchYahooQuote(ticker) {
     } catch (e) {}
   }
 
-  // 2. Try quote summary endpoint for price and marketCap
-  try {
-    const summaryData = await fetchJson(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=price,defaultKeyStatistics`, { headers: HEADERS });
-    const pMod = summaryData?.quoteSummary?.result?.[0]?.price;
-    const sMod = summaryData?.quoteSummary?.result?.[0]?.defaultKeyStatistics;
-    const priceVal = pMod?.regularMarketPrice?.raw ?? pMod?.regularMarketPrice;
-    const mcVal = pMod?.marketCap?.raw ?? pMod?.marketCap;
-    const sharesVal = sMod?.sharesOutstanding?.raw ?? sMod?.sharesOutstanding;
-    if (finite(priceVal)) {
-      return {
-        price: priceVal,
-        marketCap: finite(mcVal) ? mcVal : null,
-        shares: finite(sharesVal) ? sharesVal : null,
-        currency: pMod?.currency || null,
-        exchange: pMod?.exchangeName || null,
-        instrumentType: pMod?.quoteType || null,
-        marketTime: pMod?.regularMarketTime ? new Date(pMod.regularMarketTime * 1000).toISOString() : null,
-        source: "Yahoo Finance summary"
-      };
-    }
-  } catch (e) {}
-
-  // 3. Fallback to chart endpoint for price
+  // 3. Final fallback to chart endpoint for price
   const data = await fetchJson(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=1d`, { headers: HEADERS });
   const result = data?.chart?.result?.[0];
   const meta = result?.meta || {};
@@ -70,6 +122,12 @@ async function fetchYahooQuote(ticker) {
   return {
     price: finite(price) ? price : null,
     marketCap: finite(meta.marketCap) ? meta.marketCap : null,
+    totalDebt: null,
+    totalCash: null,
+    currentRatio: null,
+    quickRatio: null,
+    bookValue: null,
+    enterpriseValue: null,
     currency: meta.currency || null,
     exchange: meta.exchangeName || meta.fullExchangeName || null,
     instrumentType: meta.instrumentType || null,
