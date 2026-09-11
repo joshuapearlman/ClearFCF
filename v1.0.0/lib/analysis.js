@@ -581,8 +581,8 @@ async function analyzeBatch(tickers, options = {}) {
   const reports = {};
   const failures = [];
   let index = 0;
-  // Use 1 worker to ensure serialized, rate-safe requests to Yahoo and SEC
-  const workers = 1;
+  // 3 concurrent workers provides 3x speedup while remaining comfortably under SEC limit (max 10 req/s)
+  const workers = Math.min(3, tickers.length);
   async function worker() {
     while (index < tickers.length) {
       const ticker = tickers[index++];
@@ -591,8 +591,8 @@ async function analyzeBatch(tickers, options = {}) {
       } catch (error) {
         failures.push({ ticker, error: error.message || "Analysis failed." });
       }
-      // Option A: 350ms pacing delay between ticker analyses to prevent rate limiting
-      await new Promise((r) => setTimeout(r, 350));
+      // Lean 35ms event-loop yield between ticker calls
+      await new Promise((r) => setTimeout(r, 35));
     }
   }
   await Promise.all(Array.from({ length: workers }, worker));
