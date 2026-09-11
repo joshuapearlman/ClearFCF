@@ -51,15 +51,17 @@ http.createServer(async (req, rawRes) => {
     return handler(req, responseAdapter(rawRes));
   }
 
-  const names = {
+ const names = {
     "/": "index.html",
     "/app.js": "app.js",
     "/styles.css": "styles.css",
     "/audit.css": "audit.css",
-    "/favicon.png": "favicon.png",
     "/favicon.ico": "favicon.ico",
+    "/favicon-16.png": "favicon-16.png",
+    "/favicon-32.png": "favicon-32.png",
     "/apple-touch-icon.png": "apple-touch-icon.png",
-    "/logo.png": "logo.png"
+    "/logo-trimmed.png": "logo-trimmed.png",
+    "/icon-mark.png": "icon-mark.png"
   };
   const name = names[url.pathname];
   if (!name) { rawRes.statusCode = 404; return rawRes.end("Not found"); }
