@@ -605,7 +605,8 @@ async function openReport(ticker) {
   $("#report").innerHTML = `<div class="panel">Loading <strong>${escapeHtml(ticker)}</strong>...</div>`;
   setStatus(`Loading the full ${ticker} report...`);
   try {
-    const report = state.reports[ticker] || await request(`/api/analyze?ticker=${encodeURIComponent(ticker)}`);
+    // Option A: Always fetch a fresh uncached report on click to guarantee live snapshot data
+    const report = await request(`/api/analyze?ticker=${encodeURIComponent(ticker)}&_t=${Date.now()}`);
     state.reports[ticker] = report;
     $("#report").innerHTML = renderReport(report);
 
@@ -732,7 +733,7 @@ async function runAuto() {
         await new Promise((r) => setTimeout(r, 2500));
       } else {
         setStatus(`Auto Finder: examined ${scan.cursor} and found ${scan.results.length} ideas.`);
-        await new Promise((r) => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, 400));
       }
     }
     scan.complete = scan.cursor >= max;
@@ -1129,7 +1130,7 @@ function getCalculationDetails(metric, report) {
         formula: 'EV/Unlevered nFCF = Enterprise Value ÷ Unlevered Normalized FCF\nUnlevered nFCF = Normalized FCF + Net Interest Expense × (1 − 21% Tax)',
         substitution: `1. Enterprise Value: ${compact(mc, true)} (Equity) + ${compact(netDebt, true)} (Net Debt) = ${compact(ev, true)}\n2. Unlevered nFCF: ${compact(nfcf, true)} + (${compact(latest.interest || 0, true)} Interest × 79%) = ${compact(v.evToUnleveredNfcf ? ev / v.evToUnleveredNfcf : 0, true)}\n3. EV Multiple: ${compact(ev, true)} ÷ Unlevered nFCF = ${multiple(v.evToUnleveredNfcf)}`,
         meaning: 'Provides a capital-structure-neutral valuation of the operating business. Adding back after-tax interest allows an apples-to-apples comparison between debt-free and leveraged companies.',
-        sources: `Balance Sheet (Debt & Cash): ${v.debtSource || "Yahoo Finance live snapshot"} • Market Cap: ${v.marketCapSource || "Yahoo Finance"} • 10Y Financials: SEC EDGAR XBRL`
+        sources: 'SEC 10-K Balance Sheet (Debt, Cash) and Interest Expense'
       };
 
     case 'fcfYield':
@@ -1184,7 +1185,7 @@ function getCalculationDetails(metric, report) {
         formula: 'Net Debt = Total Debt (Short-Term + Long-Term) − Cash & Cash Equivalents',
         substitution: `Total Debt: ${compact(v.debt, true)}\n− Cash & Short-Term Investments: ${compact(v.cash, true)}\n= ${compact(v.netDebt, true)} Net Debt`,
         meaning: 'Financial leverage check. Negative net debt means the company has more liquid cash than its entire debt load (a net-cash fortress balance sheet).',
-        sources: `Debt: ${v.debtSource || "Yahoo Finance live snapshot"} • Cash: ${v.cashSource || "Yahoo Finance live snapshot"}`
+        sources: 'SEC 10-K Balance Sheet Instant Facts'
       };
 
     case 'netDebtToNfcf':
