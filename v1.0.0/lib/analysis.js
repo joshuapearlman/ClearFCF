@@ -96,7 +96,7 @@ function normalize(rows, maxYears = null) {
   // Allow margin agreement if gap <= 25%, OR if margins are structurally expanding (recent 3y avg >= median)
   const recentUsable = usable.slice(0, Math.min(3, usable.length));
   const recentAvgMargin = recentUsable.reduce((sum, r) => sum + r.fcfMargin, 0) / recentUsable.length;
-  const isExpanding = finite(recentAvgMargin) && finite(medianMargin) && (recentAvgMargin - medianMargin) >= 0.015;
+  const isExpanding = finite(recentAvgMargin) && finite(medianMargin) && recentAvgMargin >= medianMargin;
   const marginAgreement = (finite(averageMedianGap) && averageMedianGap <= 0.25) || isExpanding;
 
   // Outlier detection via MAD
@@ -223,11 +223,10 @@ function computeQuality(rows, normalized, currentPrice = null) {
   let recent3yAvgMargin = null;
   let baselineMargin = null;
   let marginSlope = null;
-  if (usable.length >= 4) {
+  if (usable.length >= 3) {
     const recent3 = usable.slice(0, 3);
     recent3yAvgMargin = recent3.reduce((sum, r) => sum + r.fcfMargin, 0) / recent3.length;
-    // Disjoint baseline: Years 3 to 7 without overlapping Year 2
-    const baseline = usable.slice(3, Math.min(7, usable.length));
+    const baseline = usable.length >= 5 ? usable.slice(2, 5) : usable.slice(1);
     baselineMargin = baseline.length ? baseline.reduce((sum, r) => sum + r.fcfMargin, 0) / baseline.length : recent3yAvgMargin;
     marginSlope = recent3yAvgMargin - baselineMargin;
 
@@ -424,10 +423,8 @@ async function analyzeTicker(rawTicker, options = {}) {
 
   // Solvency check: Near-term debt vs. liquidity
   const cashVal = cash || 0;
-  const latestFcf = normalized.latestReportedFcf ?? 0;
-  // If company is burning cash (negative FCF), cash generation drains available liquidity
-  const netAnnualLiquidity = latestFcf;
-  const immediateDebtRisk = shortDebt > 0 && shortDebt > (cashVal + netAnnualLiquidity);
+  const annualCashGeneration = Math.max(0, normalized.latestReportedFcf || 0);
+  const immediateDebtRisk = shortDebt > 0 && shortDebt > (cashVal + annualCashGeneration);
   if (immediateDebtRisk) {
     warnings.push(`High near-term debt maturity: Short-term debt ($${compactStr(shortDebt)}) exceeds cash ($${compactStr(cashVal)}) plus annual FCF ($${compactStr(annualCashGeneration)}).`);
   }
@@ -584,8 +581,8 @@ async function analyzeBatch(tickers, options = {}) {
   const reports = {};
   const failures = [];
   let index = 0;
-  // Use 2 paced workers to stay well below SEC's strict 10 requests/second threshold
-  const workers = Math.min(2, tickers.length);
+  // Use 1 worker to ensure serialized, rate-safe requests to Yahoo and SEC
+  const workers = 1;
   async function worker() {
     while (index < tickers.length) {
       const ticker = tickers[index++];
@@ -594,8 +591,8 @@ async function analyzeBatch(tickers, options = {}) {
       } catch (error) {
         failures.push({ ticker, error: error.message || "Analysis failed." });
       }
-      // Small pause between ticker analyses to avoid burst rate limits
-      await new Promise((r) => setTimeout(r, 120));
+      // Option A: 350ms pacing delay between ticker analyses to prevent rate limiting
+      await new Promise((r) => setTimeout(r, 350));
     }
   }
   await Promise.all(Array.from({ length: workers }, worker));
