@@ -3,12 +3,41 @@
   "version": "1.0.0",
   "private": true,
   "description": "Transparent normalized free-cash-flow stock screener for Vercel",
-  "main": "server.js",
+  "main": "electron-main.js",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "test": "node --test",
-    "start": "node server.js"
+    "start": "node server.js",
+    "app": "electron .",
+    "build:mac": "electron-builder --mac",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^32.3.3",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.clearfcf.screener",
+    "productName": "ClearFCF",
+    "mac": {
+      "category": "public.app-category.finance",
+      "target": [
+        "zip"
+      ],
+      "icon": "public/icon-mark.png"
+    },
+    "files": [
+      "api/**/*",
+      "lib/**/*",
+      "public/**/*",
+      "electron-main.js",
+      "server.js",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "electron-main.js"
+    }
   }
 }

@@ -2,6 +2,25 @@
 
 A from-scratch, Vercel-ready normalized free-cash-flow idea screener. Multiple market universes (S&P 500, S&P 400 MidCap, Small-Cap, Full SEC Directory, Yahoo Discovery) generate candidates; official SEC Company Facts provide six to ten years of annual financial evidence.
 
+The website and Mac app share this same codebase. Changes pushed to GitHub continue to deploy to the website through Vercel, while a new Mac build can be created from the same version whenever needed.
+
+## Running the Mac app
+
+From the `v1.0.0` folder:
+
+```sh
+pnpm install
+pnpm app
+```
+
+To create a distributable Apple-silicon Mac build:
+
+```sh
+pnpm build:mac
+```
+
+The packaged app is written to the `dist` folder. Public distribution without macOS security warnings requires Apple Developer signing and notarization.
+
 ## What it includes
 - **Selectable Screening Universes**: S&P 500 (Large Cap), S&P 400 (Mid Cap), Small-Cap Value (~500+), Full SEC Operating Universe (~4,000+), or Yahoo Discovery lists
 - **"Skip Previously Reviewed" Toggle & Reset**: Remembers dismissed ideas in browser storage so every scan yields fresh candidates, with an instant one-click history reset

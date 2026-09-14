@@ -37,7 +37,8 @@ function responseAdapter(res) {
   return res;
 }
 
-http.createServer(async (req, rawRes) => {
+function createAppServer() {
+  return http.createServer(async (req, rawRes) => {
   const url = new URL(req.url, "http://localhost");
   const handler = handlers[url.pathname];
   if (handler) {
@@ -87,6 +88,36 @@ http.createServer(async (req, rawRes) => {
     rawRes.end("Internal error loading asset");
   });
   stream.pipe(rawRes);
-}).listen(process.env.PORT || 3000, () => {
-  console.log(`Clear FCF Screener running at http://localhost:${process.env.PORT || 3000}`);
-});
+  });
+}
+
+let activeServer = null;
+
+function start(port = process.env.PORT || 3000) {
+  if (activeServer) return Promise.resolve(activeServer);
+
+  return new Promise((resolve, reject) => {
+    const server = createAppServer();
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => {
+      server.off("error", reject);
+      activeServer = server;
+      const address = server.address();
+      const activePort = typeof address === "object" && address ? address.port : port;
+      console.log(`Clear FCF Screener running at http://127.0.0.1:${activePort}`);
+      resolve(server);
+    });
+  });
+}
+
+function stop() {
+  if (!activeServer) return;
+  activeServer.close();
+  activeServer = null;
+}
+
+if (require.main === module) {
+  start();
+}
+
+module.exports = { createAppServer, start, stop };
