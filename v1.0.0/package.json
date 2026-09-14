@@ -3,14 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "description": "Transparent normalized free-cash-flow stock screener for Vercel",
-  "main": "electron-main.js",
+  "main": "server.js",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "test": "node --test",
     "start": "node server.js",
-    "app": "electron .",
+    "app": "electron electron-main.js",
     "build:mac": "electron-builder --mac",
     "dist": "electron-builder"
   },
