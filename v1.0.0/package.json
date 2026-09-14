@@ -32,6 +32,7 @@
       "api/**/*",
       "lib/**/*",
       "public/**/*",
+      "desktop-server.js",
       "electron-main.js",
       "server.js",
       "package.json"

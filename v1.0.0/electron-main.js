@@ -3,7 +3,7 @@
 const { app, BrowserWindow, dialog, shell } = require("electron");
 const http = require("node:http");
 
-const server = require("./server");
+const server = require("./desktop-server");
 
 let mainWindow;
 
