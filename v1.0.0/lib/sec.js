@@ -2,7 +2,7 @@
 
 const { fetchJson, finite } = require("./utils");
 
-const SEC_AGENT = process.env.SEC_USER_AGENT || "ClearFCFScreener/1.0 contact@example.com";
+const SEC_AGENT = process.env.SEC_USER_AGENT || "ClearFCF/1.0 (https://github.com/joshuapearlman/ClearFCF)";
 const SEC_HEADERS = { "User-Agent": SEC_AGENT, Accept: "application/json", "Accept-Encoding": "gzip, deflate" };
 const cache = new Map();
 const CACHE_MS = 6 * 60 * 60 * 1000;
@@ -37,7 +37,7 @@ const TAGS = {
   sbc: ["ShareBasedCompensation"],
   dilutedShares: ["WeightedAverageNumberOfDilutedSharesOutstanding", "WeightedAverageNumberOfSharesOutstandingBasicAndDiluted"],
   sharesOutstanding: ["EntityCommonStockSharesOutstanding", "CommonStockSharesOutstanding"],
-  cash: ["CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents", "CashCashEquivalentsAndShortTermInvestments"],
+  cash: ["CashCashEquivalentsAndShortTermInvestments", "CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"],
   totalDebt: [
     "LongTermDebtAndFinanceLeaseObligations", "DebtAndFinanceLeaseObligations", "LongTermDebtAndCapitalLeaseObligations",
     "LongTermDebt", "SeniorNotes", "NotesPayable", "CommercialPaper", "LinesOfCredit"
@@ -158,7 +158,12 @@ function bestAnnualSeries(facts, tags) {
       const yearMap = dedupeByYear(annualFacts(concept));
       for (const [year, fact] of yearMap.entries()) {
         if (!mergedValues.has(year)) {
-          mergedValues.set(year, fact);
+          mergedValues.set(year, {
+            ...fact,
+            taxonomy,
+            tag,
+            label: concept.label || tag
+          });
           if (!bestTag) {
             bestTag = tag;
             bestLabel = concept.label || tag;

@@ -1,6 +1,7 @@
 "use strict";
 
 const $ = (selector) => document.querySelector(selector);
+const screening = window.ClearFcfScreening;
 
 const MC_LEVELS = [0, 500e6, 1e9, 2e9, 5e9, 10e9, 50e9, 100e9, 500e9];
 const MC_LEVEL_LABELS = ["$0 (All)", "$500M", "$1B", "$2B", "$5B", "$10B", "$50B", "$100B", "$500B"];
@@ -21,7 +22,9 @@ const PRESETS = {
     minMarketCap: 0,
     maxMarketCap: Infinity,
     enforceSolvency: true,
-    excludeFinancials: true
+    excludeFinancials: true,
+    requireCompleteData: true,
+    lookbackYears: "all"
   },
   compounder: {
     name: "Quality Compounder",
@@ -33,7 +36,9 @@ const PRESETS = {
     maxDilution: 0.35,
     minPosFcf: 0.67,
     enforceSolvency: false,
-    excludeFinancials: true
+    excludeFinancials: true,
+    requireCompleteData: true,
+    lookbackYears: "all"
   },
   "deep-value": {
     name: "Deep Value",
@@ -45,7 +50,9 @@ const PRESETS = {
     maxDilution: 0.10,
     minPosFcf: 0.75,
     enforceSolvency: true,
-    excludeFinancials: true
+    excludeFinancials: true,
+    requireCompleteData: true,
+    lookbackYears: "all"
   }
 };
 
@@ -61,47 +68,7 @@ const state = {
 };
 
 function evaluateReportStatus(row, crit) {
-  const isFin = row.isFinancial || (row.company && row.company.sic >= 6000 && row.company.sic <= 6799);
-  if (crit.excludeFinancials && isFin) return "Excluded";
-
-  const mc = Number(row.marketCap ?? row.valuation?.marketCap ?? 0);
-  if (crit.minMarketCap && mc < crit.minMarketCap) return "Excluded";
-  if (Number.isFinite(crit.maxMarketCap) && mc > crit.maxMarketCap) return "Excluded";
-
-  const usableYears = Number(row.usableYears ?? row.normalized?.usableYears ?? 0);
-  if (usableYears < (crit.minYears || 3)) return "Excluded";
-
-  const pToNfcf = Number(row.priceToNfcf ?? row.valuation?.priceToNfcf);
-  if (!Number.isFinite(pToNfcf) || pToNfcf <= 0) return "Review";
-
-  const maxP = Number(crit.maxMultiple ?? 15);
-  if (pToNfcf > maxP) return "Review";
-
-  if (Number.isFinite(crit.maxEvMultiple)) {
-    const evMultiple = Number(row.evToUnleveredNfcf ?? row.valuation?.evToUnleveredNfcf);
-    if (!Number.isFinite(evMultiple) || evMultiple > crit.maxEvMultiple) return "Review";
-  }
-
-  const netDebtToNfcf = Number(row.netDebtToNfcf ?? row.valuation?.netDebtToNfcf);
-  if (Number.isFinite(netDebtToNfcf) && netDebtToNfcf > (crit.maxDebt || 4)) return "Review";
-
-  const sbcToFcf = Number(row.latestSbcToFcf ?? row.quality?.latestSbcToFcf);
-  if (Number.isFinite(sbcToFcf) && sbcToFcf > (crit.maxSbc || 0.30)) return "Review";
-
-  const dilution = Number(row.shareChange ?? row.quality?.shareChange);
-  if (Number.isFinite(dilution) && dilution > (crit.maxDilution || 0.25)) return "Review";
-
-  const posRatio = Number(row.positiveFcfRatio ?? row.quality?.positiveFcfRatio);
-  if (Number.isFinite(posRatio) && posRatio < (crit.minPosFcf || 0.67)) return "Review";
-
-  if (crit.enforceSolvency) {
-    const shortDebt = Number(row.shortDebt ?? row.valuation?.shortDebt ?? 0);
-    const cash = Number(row.cash ?? row.valuation?.cash ?? 0);
-    const latestFcf = Number(row.latestFcf ?? row.normalized?.latestReportedFcf ?? 0);
-    if (shortDebt > 0 && shortDebt > (cash + Math.max(0, latestFcf))) return "Review";
-  }
-
-  return "Idea";
+  return screening.evaluateCandidate(row, crit).status;
 }
 
 const STORAGE_KEY = "clear-fcf-auto-v3";
@@ -247,7 +214,7 @@ function tableHtml(results, title) {
               ${row.buybackRating === 'Accretive' ? '<span class="badge badge-blue" title="Historical buybacks executed at a discount">Accretive Buyback</span>' : ''}
               ${row.latestSbcToFcf && row.latestSbcToFcf > 0.25 ? '<span class="badge badge-amber" title="SBC absorbs >25% of FCF">High SBC</span>' : ''}
             </td>
-            <td><span class="badge ${String(row.status).toLowerCase()}">${escapeHtml(row.status)}</span></td>
+            <td title="${escapeHtml([...(row.evaluation?.exclusions || []), ...(row.evaluation?.failures || []), ...(row.evaluation?.unknowns || [])].join("\n"))}"><span class="badge ${String(row.status).toLowerCase()}">${escapeHtml(row.status)}</span></td>
             <td>${compact(row.price, true)}</td>
             <td>${compact(row.marketCap, true)}</td>
             <td>${multiple(row.priceToNfcf)}</td>
@@ -315,8 +282,14 @@ function applyFilterAndSort(results) {
 
   // 1. Dynamic Evaluation using User Controlled Criteria
   list = list.map((r) => {
-    const dynamicStatus = evaluateReportStatus(r, crit);
-    return { ...r, status: dynamicStatus, passesDefaultIdeaFilter: dynamicStatus === "Idea" };
+    const evaluation = screening.evaluateCandidate(r, crit);
+    return {
+      ...r,
+      ...evaluation.selected,
+      status: evaluation.status,
+      evaluation,
+      passesDefaultIdeaFilter: evaluation.status === "Idea"
+    };
   });
 
   // Filter based on active criteria thresholds
@@ -349,7 +322,7 @@ function applyFilterAndSort(results) {
     list = list.filter((r) => typeof r.netDebtToNfcf === 'number' && r.netDebtToNfcf < 0);
   }
   if (state.activeFilters.has('low-sbc')) {
-    list = list.filter((r) => r.latestSbcToFcf === null || r.latestSbcToFcf < 0.15);
+    list = list.filter((r) => typeof r.latestSbcToFcf === 'number' && r.latestSbcToFcf < 0.15);
   }
   if (state.activeFilters.has('buybacks')) {
     list = list.filter((r) => typeof r.shareChange === 'number' && r.shareChange < 0);
@@ -393,12 +366,11 @@ function exportCsv(results) {
   URL.revokeObjectURL(link.href);
 }
 
-function rowTable(rows, ttm) {
-  const allRows = ttm ? [{ ...ttm, year: 'TTM (Last 12M)' }, ...rows] : rows;
+function rowTable(rows) {
   return `<div class="table-scroll"><table><thead><tr>
     <th>Period</th><th>Revenue</th><th>OCF</th><th>CapEx</th><th>Standard FCF</th><th>SBC</th><th>Economic FCF</th><th>D&A</th><th>Diluted Shares</th>
-  </tr></thead><tbody>${allRows.map((row) => `<tr class="${row.isTtm ? 'ttm-row' : ''}">
-    <td><strong>${row.year}</strong> ${row.isTtm ? '★' : ''}</td>
+  </tr></thead><tbody>${rows.map((row) => `<tr>
+    <td title="${escapeHtml(Object.entries(row.evidence || {}).filter(([, fact]) => fact?.tag).map(([key, fact]) => `${key}: ${fact.taxonomy}:${fact.tag} (${fact.form || "filing"}, filed ${fact.filed || "unknown"})`).join("\n"))}"><strong>${row.year}</strong></td>
     <td>${compact(row.revenue, true)}</td>
     <td>${compact(row.ocf, true)}</td>
     <td>${compact(row.capex, true)}</td>
@@ -413,10 +385,10 @@ function rowTable(rows, ttm) {
 function renderWaterfall(latestRow, normalized) {
   const ocf = latestRow?.ocf || 0;
   const capex = latestRow?.capex || 0;
-  const sbc = latestRow?.sbc || 0;
-  const econFcf = latestRow?.fcfEconomic ?? (latestRow?.fcf ? latestRow.fcf - sbc : 0);
+  const sbc = latestRow?.sbc;
+  const econFcf = latestRow?.fcfEconomic;
 
-  if (!ocf || ocf <= 0) return "";
+  if (!ocf || ocf <= 0 || !Number.isFinite(sbc) || !Number.isFinite(econFcf)) return "";
 
   const capexPct = Math.min(100, Math.max(2, Math.round((capex / ocf) * 100)));
   const sbcPct = Math.min(100, Math.max(2, Math.round((sbc / ocf) * 100)));
@@ -452,13 +424,34 @@ function renderWaterfall(latestRow, normalized) {
 
 function renderReverseDcf(report) {
   const v = report.valuation;
-  const n = report.normalized;
-  if (!v.marketCap || !n.normalizedFcf || n.normalizedFcf <= 0) return "";
+  const selected = screening.selectedMetrics(report, state.criteria);
+  const startingFcf = selected.normalizedEconomicFcf;
+  if (!v.marketCap || !startingFcf || startingFcf <= 0 || !Number.isFinite(v.netDebt)) return "";
 
-  const currentMultiple = v.marketCap / n.normalizedFcf;
-  // Approximated implied 5-year compound growth rate priced into current multiple at a 9% hurdle rate:
   const hurdle = 0.09;
-  const impliedGrowth = Math.round(((1 / currentMultiple + 0.025 - hurdle) * -1) * 1000) / 10;
+  const terminalGrowth = 0.025;
+  const years = 5;
+  function equityValue(growth) {
+    let presentValue = 0;
+    let cashFlow = startingFcf;
+    for (let year = 1; year <= years; year += 1) {
+      cashFlow *= 1 + growth;
+      presentValue += cashFlow / ((1 + hurdle) ** year);
+    }
+    const terminalValue = cashFlow * (1 + terminalGrowth) / (hurdle - terminalGrowth);
+    return presentValue + terminalValue / ((1 + hurdle) ** years) - v.netDebt;
+  }
+  let low = -0.50;
+  let high = 1.00;
+  const target = v.marketCap;
+  if (equityValue(low) > target || equityValue(high) < target) return "";
+  for (let iteration = 0; iteration < 80; iteration += 1) {
+    const mid = (low + high) / 2;
+    if (equityValue(mid) < target) low = mid;
+    else high = mid;
+  }
+  const impliedGrowthRate = (low + high) / 2;
+  const impliedGrowth = Math.round(impliedGrowthRate * 1000) / 10;
 
   return `<div class="report-card">
     <div class="reverse-dcf-head">
@@ -471,13 +464,13 @@ function renderReverseDcf(report) {
     <div class="report-grid">
       <div class="metric">
         <span>Current P/nFCF Multiple</span>
-        <strong>${multiple(v.priceToNfcf)}</strong>
-        <small>Market Cap / Normalized FCF</small>
+        <strong>${multiple(selected.priceToNfcf)}</strong>
+        <small>Selected-lookback Market Cap / nFCF</small>
       </div>
       <div class="metric">
         <span>Assumed Hurdle Rate</span>
         <strong>9.0%</strong>
-        <small>Target annual investor return</small>
+        <small>2.5% terminal growth; 5-year forecast</small>
       </div>
       <div class="metric">
         <span>Priced-In 5Y Growth</span>
@@ -494,8 +487,11 @@ function renderReverseDcf(report) {
 }
 
 function renderReport(report) {
-  const v = report.valuation;
-  const n = report.normalized;
+  const evaluation = screening.evaluateCandidate(report, state.criteria);
+  const lookback = screening.lookbackKey(state.criteria);
+  const fullN = report.normalized;
+  const n = lookback === "3" ? report.normalized3y : lookback === "5" ? report.normalized5y : report.normalized;
+  const v = { ...report.valuation, ...evaluation.selected };
   const q = report.quality;
   const filingUrl = report.filing?.url;
   const yahooUrl = `https://finance.yahoo.com/quote/${encodeURIComponent(report.ticker)}`;
@@ -504,7 +500,7 @@ function renderReport(report) {
   return `<div class="report-card">
     <div class="report-title">
       <div>
-        <p class="kicker">${escapeHtml(evaluateReportStatus(report, state.criteria))}</p>
+        <p class="kicker">${escapeHtml(evaluation.status)} • ${lookback === "all" ? "Full-history" : `${lookback}-year`} screen</p>
         <h2>${escapeHtml(report.ticker)} • ${escapeHtml(report.companyName)}</h2>
         <p class="muted">${escapeHtml(report.company.sicDescription || "Industry unavailable")} • ${escapeHtml(report.quote.exchange || report.company.exchanges?.[0] || "Exchange unavailable")}</p>
         <div class="filing-links">
@@ -514,11 +510,19 @@ function renderReport(report) {
         </div>
       </div>
       <div class="report-actions">
-        <button type="button" class="btn secondary memo-btn" onclick="window.print()">📄 Print Memo</button>
-        <span class="badge ${String(evaluateReportStatus(report, state.criteria)).toLowerCase()}">${escapeHtml(evaluateReportStatus(report, state.criteria))}</span>
+        <button type="button" class="btn secondary memo-btn">📄 Print Memo</button>
+        <span class="badge ${String(evaluation.status).toLowerCase()}">${escapeHtml(evaluation.status)}</span>
       </div>
     </div>
     ${report.warnings.length ? `<div class="warnings"><strong>Check before relying on this result</strong><ul>${report.warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul></div>` : ""}
+    <div class="warnings"><strong>Evidence confidence: ${escapeHtml(report.evidenceConfidence?.level || "Unknown")}</strong>
+      <ul>
+        ${evaluation.failures.map((item) => `<li>Failed: ${escapeHtml(item)}</li>`).join("")}
+        ${evaluation.exclusions.map((item) => `<li>Excluded: ${escapeHtml(item)}</li>`).join("")}
+        ${evaluation.unknowns.map((item) => `<li>Unknown: ${escapeHtml(item)}</li>`).join("")}
+        ${!evaluation.failures.length && !evaluation.exclusions.length && !evaluation.unknowns.length ? "<li>All required screening evidence is available.</li>" : ""}
+      </ul>
+    </div>
   </div>
 
   <div class="report-grid">
@@ -553,8 +557,8 @@ function renderReport(report) {
   </div>
 
   <div class="report-card">
-    <h3>Annual Evidence & TTM Overlay</h3>
-    ${rowTable(report.rows, report.ttm)}
+    <h3>Annual Filing Evidence</h3>
+    ${rowTable(report.rows)}
     <div class="filing-links">
       ${filingUrl ? `<a class="source-link" href="${escapeHtml(filingUrl)}" target="_blank" rel="noopener">📄 Latest ${escapeHtml(report.filing.form)} filed ${escapeHtml(report.filing.filed)}</a>` : '<span class="muted">SEC filing link unavailable</span>'}
       <span class="dot-sep">•</span>
@@ -571,9 +575,9 @@ function renderReport(report) {
     </div>
     <div class="report-grid" style="margin-top:12px;">
       <div class="metric">
-        <span>Full History (${n.usableYears}Y) Margin</span>
-        <strong>${percent(n.blendedMargin)}</strong>
-        <small>nFCF: ${compact(n.normalizedFcf, true)}</small>
+        <span>Full History (${fullN.usableYears}Y) Margin</span>
+        <strong>${percent(fullN.blendedMargin)}</strong>
+        <small>nFCF: ${compact(fullN.normalizedFcf, true)}</small>
       </div>
       <div class="metric">
         <span>5-Year Blended Margin</span>
@@ -596,6 +600,7 @@ function renderReport(report) {
   <div class="report-card">
     <h3>Sources and Methodology</h3>
     <p>Financials: <strong>SEC Company Facts</strong>. Price: <strong>${escapeHtml(report.sources.price || "Unavailable")}</strong>. Analyzed ${escapeHtml(new Date(report.analyzedAt).toLocaleString())}.</p>
+    <p>Debt: <strong>${escapeHtml(report.sources.debt || "Unavailable")}</strong>. Cash: <strong>${escapeHtml(report.sources.cash || "Unavailable")}</strong>. Hover an annual period to inspect the exact XBRL concepts used for that year.</p>
   </div>`;
 }
 
@@ -609,13 +614,6 @@ async function openReport(ticker) {
     const report = await request(`/api/analyze?ticker=${encodeURIComponent(ticker)}&_t=${Date.now()}`);
     state.reports[ticker] = report;
     $("#report").innerHTML = renderReport(report);
-
-    // Directly bind metric tiles to calculation breakdown modal
-    document.querySelectorAll(".metric.clickable[data-metric]").forEach((tile) => {
-      tile.addEventListener("click", () => {
-        openCalculationModal(tile.dataset.metric, report);
-      });
-    });
 
     setStatus(`${ticker} analysis complete.`);
   } catch (error) {
@@ -835,102 +833,6 @@ function initFilterChips() {
     toggleTolBtn.classList.toggle("active", !tolDrawer?.classList.contains("hidden"));
   });
 
-  function applyPreset(presetKey) {
-    const preset = PRESETS[presetKey];
-    if (!preset) return;
-    state.activePreset = presetKey;
-    state.criteria = { ...preset };
-
-    document.querySelectorAll(".preset-btn").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.preset === presetKey);
-    });
-
-    // Update UI controls to match preset
-    if ($("#tol-multiple")) { $("#tol-multiple").value = preset.maxMultiple; $("#tol-multiple-val").textContent = `${preset.maxMultiple}x`; }
-  if ($("#tol-ev-multiple")) {
-    const evVal = Number.isFinite(preset.maxEvMultiple) ? preset.maxEvMultiple : 100;
-    $("#tol-ev-multiple").value = Math.min(100, evVal);
-    $("#tol-ev-multiple-val").textContent = evVal >= 100 ? "Any (100x+)" : `${evVal}x`;
-  }
-  if ($("#tol-min-mc-slider")) { $("#tol-min-mc-slider").value = 0; $("#tol-min-mc-val").textContent = "$0 (All)"; }
-  if ($("#tol-max-mc-slider")) { $("#tol-max-mc-slider").value = 8; $("#tol-max-mc-val").textContent = "Any ($5T+)"; }
-    if ($("#tol-years")) { $("#tol-years").value = preset.minYears; $("#tol-years-val").textContent = `${preset.minYears} yrs`; }
-    if ($("#tol-debt")) { $("#tol-debt").value = preset.maxDebt; $("#tol-debt-val").textContent = `${Number(preset.maxDebt).toFixed(1)}x`; }
-    if ($("#tol-sbc")) { $("#tol-sbc").value = Math.round(preset.maxSbc * 100); $("#tol-sbc-val").textContent = `${Math.round(preset.maxSbc * 100)}%`; }
-    if ($("#tol-dilution")) { $("#tol-dilution").value = Math.round(preset.maxDilution * 100); $("#tol-dilution-val").textContent = `${Math.round(preset.maxDilution * 100)}%`; }
-    if ($("#tol-posfcf")) { $("#tol-posfcf").value = Math.round(preset.minPosFcf * 100); $("#tol-posfcf-val").textContent = `${Math.round(preset.minPosFcf * 100)}%`; }
-    if ($("#tol-solvency")) { $("#tol-solvency").checked = preset.enforceSolvency; }
-    if ($("#tol-financials")) { $("#tol-financials").checked = preset.excludeFinancials; }
-
-    refreshActiveTable();
-    updateActiveReportIfOpen();
-  }
-
-  function markCustom() {
-    state.activePreset = "custom";
-    document.querySelectorAll(".preset-btn").forEach((btn) => btn.classList.remove("active"));
-    refreshActiveTable();
-    updateActiveReportIfOpen();
-  }
-
-  function updateActiveReportIfOpen() {
-    const currentTicker = $("#single-ticker")?.value.trim().toUpperCase();
-    if (currentTicker && state.reports[currentTicker] && document.querySelector("#report").innerHTML.includes("report-card")) {
-      $("#report").innerHTML = renderReport(state.reports[currentTicker]);
-    }
-  }
-
-  // Presets buttons
-  document.querySelectorAll(".preset-btn").forEach((btn) => {
-    btn.addEventListener("click", () => applyPreset(btn.dataset.preset));
-  });
-
-  // Slider inputs
-  $("#tol-multiple")?.addEventListener("input", (e) => {
-    state.criteria.maxMultiple = Number(e.target.value);
-    $("#tol-multiple-val").textContent = `${e.target.value}x`;
-    markCustom();
-  });
-
-  $("#tol-years")?.addEventListener("input", (e) => {
-    state.criteria.minYears = Number(e.target.value);
-    $("#tol-years-val").textContent = `${e.target.value} yrs`;
-    markCustom();
-  });
-
-  $("#tol-debt")?.addEventListener("input", (e) => {
-    state.criteria.maxDebt = Number(e.target.value);
-    $("#tol-debt-val").textContent = `${Number(e.target.value).toFixed(1)}x`;
-    markCustom();
-  });
-
-  $("#tol-sbc")?.addEventListener("input", (e) => {
-    state.criteria.maxSbc = Number(e.target.value) / 100;
-    $("#tol-sbc-val").textContent = `${e.target.value}%`;
-    markCustom();
-  });
-
-  $("#tol-dilution")?.addEventListener("input", (e) => {
-    state.criteria.maxDilution = Number(e.target.value) / 100;
-    $("#tol-dilution-val").textContent = `${e.target.value}%`;
-    markCustom();
-  });
-
-  $("#tol-posfcf")?.addEventListener("input", (e) => {
-    state.criteria.minPosFcf = Number(e.target.value) / 100;
-    $("#tol-posfcf-val").textContent = `${e.target.value}%`;
-    markCustom();
-  });
-
-  $("#tol-solvency")?.addEventListener("change", (e) => {
-    state.criteria.enforceSolvency = e.target.checked;
-    markCustom();
-  });
-
-  $("#tol-financials")?.addEventListener("change", (e) => {
-    state.criteria.excludeFinancials = e.target.checked;
-    markCustom();
-  });
 }
 
 function refreshActiveTable() {
@@ -1057,8 +959,9 @@ initCommandPalette();
 
 // Calculation Breakdown Engine
 function getCalculationDetails(metric, report) {
-  const v = report.valuation;
-  const n = report.normalized;
+  const lookback = screening.lookbackKey(state.criteria);
+  const n = lookback === "3" ? report.normalized3y : lookback === "5" ? report.normalized5y : report.normalized;
+  const v = { ...report.valuation, ...screening.selectedMetrics(report, state.criteria) };
   const q = report.quality;
   const latest = report.rows[0] || {};
   const price = v.price ?? 0;
@@ -1100,8 +1003,8 @@ function getCalculationDetails(metric, report) {
     case 'economicNfcf':
       return {
         title: 'Economic Normalized FCF (Post-Stock-Based Compensation)',
-        formula: 'Economic nFCF = Normalized FCF − Stock-Based Compensation (SBC)',
-        substitution: `${compact(nfcf, true)} (Standard nFCF)\n− ${compact(latest.sbc || 0, true)} (Latest Annual Stock-Based Compensation)\n= ${compact(econNfcf, true)} Economic Free Cash Flow`,
+        formula: 'Economic nFCF = Post-SBC normalized margin × Latest Annual Revenue',
+        substitution: `The selected ${lookback === "all" ? "full-history" : `${lookback}-year`} window deducts SBC in each annual period before applying the same 50/50 margin normalization.\nEconomic nFCF = ${compact(econNfcf, true)}`,
         meaning: 'Traditional accounting treats employee stock awards as non-cash and adds them back to operating cash flow. In reality, equity compensation permanently dilutes existing shareholders. Treating SBC as an operational compensation expense reveals the true unencumbered cash return to owners.',
         sources: 'SEC EDGAR Cash Flow Statement: us-gaap/ShareBasedCompensation'
       };
@@ -1128,7 +1031,7 @@ function getCalculationDetails(metric, report) {
       return {
         title: 'EV / Unlevered nFCF (Firm Enterprise Multiple)',
         formula: 'EV/Unlevered nFCF = Enterprise Value ÷ Unlevered Normalized FCF\nUnlevered nFCF = Normalized FCF + Net Interest Expense × (1 − 21% Tax)',
-        substitution: `1. Enterprise Value: ${compact(mc, true)} (Equity) + ${compact(netDebt, true)} (Net Debt) = ${compact(ev, true)}\n2. Unlevered nFCF: ${compact(nfcf, true)} + (${compact(latest.interest || 0, true)} Interest × 79%) = ${compact(v.evToUnleveredNfcf ? ev / v.evToUnleveredNfcf : 0, true)}\n3. EV Multiple: ${compact(ev, true)} ÷ Unlevered nFCF = ${multiple(v.evToUnleveredNfcf)}`,
+        substitution: `1. Enterprise Value: ${compact(mc, true)} (Equity) + ${compact(netDebt, true)} (Net Debt) = ${compact(ev, true)}\n2. Unlevered nFCF: ${compact(nfcf, true)} + (${compact(n.averageInterest, true)} normalized interest × 79%) = ${compact(v.evToUnleveredNfcf ? ev / v.evToUnleveredNfcf : null, true)}\n3. EV Multiple: ${compact(ev, true)} ÷ Unlevered nFCF = ${multiple(v.evToUnleveredNfcf)}`,
         meaning: 'Provides a capital-structure-neutral valuation of the operating business. Adding back after-tax interest allows an apples-to-apples comparison between debt-free and leveraged companies.',
         sources: 'SEC 10-K Balance Sheet (Debt, Cash) and Interest Expense'
       };
@@ -1185,7 +1088,7 @@ function getCalculationDetails(metric, report) {
         formula: 'Net Debt = Total Debt (Short-Term + Long-Term) − Cash & Cash Equivalents',
         substitution: `Total Debt: ${compact(v.debt, true)}\n− Cash & Short-Term Investments: ${compact(v.cash, true)}\n= ${compact(v.netDebt, true)} Net Debt`,
         meaning: 'Financial leverage check. Negative net debt means the company has more liquid cash than its entire debt load (a net-cash fortress balance sheet).',
-        sources: 'SEC 10-K Balance Sheet Instant Facts'
+        sources: `Debt: ${report.sources.debt || "Unavailable"} • Cash: ${report.sources.cash || "Unavailable"}`
       };
 
     case 'netDebtToNfcf':
@@ -1240,6 +1143,18 @@ function openCalculationModal(metric, report) {
   modal.classList.remove("hidden");
 }
 
+$("#report")?.addEventListener("click", (event) => {
+  if (event.target.closest(".memo-btn")) {
+    window.print();
+    return;
+  }
+  const tile = event.target.closest(".metric.clickable[data-metric]");
+  if (!tile) return;
+  const ticker = $("#single-ticker")?.value.trim().toUpperCase();
+  const report = ticker ? state.reports[ticker] : null;
+  if (report) openCalculationModal(tile.dataset.metric, report);
+});
+
 function closeCalculationModal() {
   $("#calc-modal")?.classList.add("hidden");
 }
@@ -1284,6 +1199,7 @@ function applyPreset(presetKey) {
   if ($("#tol-posfcf")) { $("#tol-posfcf").value = Math.round(preset.minPosFcf * 100); $("#tol-posfcf-val").textContent = `${Math.round(preset.minPosFcf * 100)}%`; }
   if ($("#tol-solvency")) { $("#tol-solvency").checked = preset.enforceSolvency; }
   if ($("#tol-financials")) { $("#tol-financials").checked = preset.excludeFinancials; }
+  if ($("#lookback-select")) $("#lookback-select").value = preset.lookbackYears || "all";
 
   reEvaluateAll();
 }

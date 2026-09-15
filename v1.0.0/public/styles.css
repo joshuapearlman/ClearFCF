@@ -327,9 +327,6 @@ th.sorted-desc::after { content: " \2193"; opacity: 1; color: var(--green); }
 
 tbody tr { cursor: pointer; }
 tbody tr:hover { background: var(--green-tint); }
-tr.ttm-row { background: var(--amber-tint); font-weight: 600; }
-tr.ttm-row:hover { background: #eddcac; }
-
 .ticker { font-weight: 700; font-family: var(--sans); }
 .subname { display: block; font-size: 11px; color: var(--muted); max-width: 180px; overflow: hidden; text-overflow: ellipsis; font-family: var(--sans); }
 

@@ -60,7 +60,12 @@ async function createWindow() {
     });
 
     mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
-      shell.openExternal(targetUrl);
+      let safe = false;
+      try {
+        const parsed = new URL(targetUrl);
+        safe = parsed.protocol === "https:" && ["www.sec.gov", "finance.yahoo.com"].includes(parsed.hostname);
+      } catch {}
+      if (safe) shell.openExternal(targetUrl);
       return { action: "deny" };
     });
 

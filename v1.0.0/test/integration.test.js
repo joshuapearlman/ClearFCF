@@ -29,7 +29,8 @@ test("end-to-end analysis produces an Idea from mocked Yahoo and SEC data", asyn
       WeightedAverageNumberOfDilutedSharesOutstanding: { label: "Diluted shares", units: { shares: annualFacts(() => 100_000_000) } },
       CommonStockSharesOutstanding: { label: "Shares", units: { shares: [{ end: "2025-12-31", val: 10, form: "10-K", filed: "2026-02-15" }] } },
       CashAndCashEquivalentsAtCarryingValue: { label: "Cash", units: { USD: [{ end: "2025-12-31", val: 200_000_000, form: "10-K", filed: "2026-02-15" }] } },
-      DebtAndFinanceLeaseObligations: { label: "Debt", units: { USD: [{ end: "2025-12-31", val: 100_000_000, form: "10-K", filed: "2026-02-15" }] } }
+      DebtAndFinanceLeaseObligations: { label: "Debt", units: { USD: [{ end: "2025-12-31", val: 100_000_000, form: "10-K", filed: "2026-02-15" }] } },
+      DebtCurrent: { label: "Current debt", units: { USD: [{ end: "2025-12-31", val: 0, form: "10-K", filed: "2026-02-15" }] } }
     } } });
     if (href.includes("submissions")) return json({ name: "Test Company", sic: "3571", sicDescription: "Electronic Computers", exchanges: ["Nasdaq"], tickers: ["TEST"], filings: { recent: { form: ["10-K"], filingDate: ["2026-02-15"], accessionNumber: ["0000000001-26-000001"], primaryDocument: ["test-2025.htm"] } } });
     if (href.includes("finance/chart")) return json({ chart: { result: [{ meta: { regularMarketPrice: 10, currency: "USD", exchangeName: "NMS", instrumentType: "EQUITY", regularMarketTime: 1771113600 }, indicators: { quote: [{ close: [10] }] } }] } });

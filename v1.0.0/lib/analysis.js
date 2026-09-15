@@ -3,9 +3,25 @@
 const { fetchSecCompany, extractFinancials } = require("./sec");
 const { fetchYahooQuote, fetchExchangeRate } = require("./yahoo");
 const { finite, round, median, standardDeviation } = require("./utils");
+const { evaluateCandidate } = require("./screening");
 
 function valueForYear(series, year) {
   return series?.values?.get(year)?.val ?? null;
+}
+
+function evidenceForYear(series, year) {
+  const fact = series?.values?.get(year);
+  if (!fact) return null;
+  return {
+    taxonomy: fact.taxonomy || series.taxonomy || null,
+    tag: fact.tag || series.tag || null,
+    label: fact.label || series.label || null,
+    unit: fact.unit || series.unit || null,
+    filed: fact.filed || null,
+    form: fact.form || null,
+    accession: fact.accn || null,
+    periodEnd: fact.end || null
+  };
 }
 
 function annualRows(extracted) {
@@ -36,7 +52,7 @@ function annualRows(extracted) {
     const buybackShares = finite(buybackSharesRaw) ? Math.abs(buybackSharesRaw) : null;
 
     const fcf = finite(ocf) && finite(capex) ? ocf - capex : null;
-    const fcfEconomic = finite(fcf) ? fcf - (finite(sbc) ? sbc : 0) : null;
+    const fcfEconomic = finite(fcf) && finite(sbc) ? fcf - sbc : null;
 
     return {
       year, revenue, ocf, capex, capexTangible, capexIntangible, dna, interest, sbc, shares,
@@ -48,7 +64,8 @@ function annualRows(extracted) {
       fcfEconomicMargin: finite(fcfEconomic) && finite(revenue) && revenue > 0 ? fcfEconomic / revenue : null,
       sbcToRevenue: finite(sbc) && finite(revenue) && revenue > 0 ? sbc / revenue : null,
       sbcToFcf: finite(sbc) && finite(fcf) && fcf > 0 ? sbc / fcf : null,
-      capexToDna: finite(capex) && finite(dna) && dna > 0 ? capex / dna : null
+      capexToDna: finite(capex) && finite(dna) && dna > 0 ? capex / dna : null,
+      evidence: Object.fromEntries(Object.entries(extracted.series).map(([key, series]) => [key, evidenceForYear(series, year)]))
     };
   });
 }
@@ -64,14 +81,19 @@ function normalize(rows, maxYears = null) {
       totalRevenue: null, totalFcf: null, averageAnnualFcf: null, averageMargin: null,
       simpleAverageMargin: null, weightedMargin: null, blendedMargin: null, simpleVsWeightedGap: null,
       medianMargin: null, averageMedianGap: null, marginAgreement: false, outlierYears: [],
-      normalizedFcf: null, normalizedEconomicFcf: null
+      normalizedFcf: null, normalizedEconomicFcf: null, averageInterest: null
     };
   }
 
   const totalRevenue = usable.reduce((sum, row) => sum + row.revenue, 0);
   const totalFcf = usable.reduce((sum, row) => sum + row.fcf, 0);
-  const totalEconomicFcf = usable.reduce((sum, row) => sum + (row.fcfEconomic ?? row.fcf), 0);
+  const economicComplete = usable.every((row) => finite(row.fcfEconomic) && finite(row.fcfEconomicMargin));
+  const totalEconomicFcf = economicComplete ? usable.reduce((sum, row) => sum + row.fcfEconomic, 0) : null;
   const averageAnnualFcf = totalFcf / usable.length;
+  const interestRows = usable.filter((row) => finite(row.interest));
+  const averageInterest = interestRows.length
+    ? interestRows.reduce((sum, row) => sum + Math.max(0, row.interest), 0) / interestRows.length
+    : null;
 
   // 1. Simple average of annual margins
   const simpleAverageMargin = usable.reduce((sum, row) => sum + row.fcfMargin, 0) / usable.length;
@@ -112,10 +134,12 @@ function normalize(rows, maxYears = null) {
   const normalizedFcf = blendedMargin * latestRevenue;
 
   // Economic FCF (post-SBC) using blended margins
-  const simpleEconomicMargin = usable.reduce((sum, row) => sum + (row.fcfEconomicMargin ?? row.fcfMargin), 0) / usable.length;
-  const weightedEconomicMargin = totalRevenue > 0 ? totalEconomicFcf / totalRevenue : simpleEconomicMargin;
-  const blendedEconomicMargin = (simpleEconomicMargin + weightedEconomicMargin) / 2;
-  const normalizedEconomicFcf = blendedEconomicMargin * latestRevenue;
+  const simpleEconomicMargin = economicComplete
+    ? usable.reduce((sum, row) => sum + row.fcfEconomicMargin, 0) / usable.length
+    : null;
+  const weightedEconomicMargin = economicComplete && totalRevenue > 0 ? totalEconomicFcf / totalRevenue : null;
+  const blendedEconomicMargin = economicComplete ? (simpleEconomicMargin + weightedEconomicMargin) / 2 : null;
+  const normalizedEconomicFcf = finite(blendedEconomicMargin) ? blendedEconomicMargin * latestRevenue : null;
 
   return {
     usableYears: usable.length,
@@ -137,6 +161,7 @@ function normalize(rows, maxYears = null) {
     outlierYears,
     normalizedFcf,
     normalizedEconomicFcf,
+    averageInterest,
     includedYears: usable.map((row) => row.year)
   };
 }
@@ -158,12 +183,49 @@ function selectValuationShares(rows, instantFact) {
 }
 
 function debtValue(latest) {
-  if (finite(latest.totalDebt?.val)) return latest.totalDebt.val;
+  const total = latest.totalDebt?.val;
   const short = latest.shortDebt?.val;
   const long = latest.longDebt?.val;
-  if (finite(short) || finite(long)) return (finite(short) ? short : 0) + (finite(long) ? long : 0);
-  if (finite(latest.cash?.val)) return 0;
-  return null;
+  const components = finite(short) || finite(long) ? (finite(short) ? short : 0) + (finite(long) ? long : 0) : null;
+  if (finite(total) && finite(components)) return Math.max(total, components);
+  if (finite(total)) return total;
+  return finite(components) ? components : null;
+}
+
+function reconcileBalanceSheet(latest, quote, fxRate = 1) {
+  const secDebtRaw = debtValue(latest);
+  const secCashRaw = latest.cash?.val;
+  const secDebt = finite(secDebtRaw) ? secDebtRaw * fxRate : null;
+  const secCash = finite(secCashRaw) ? secCashRaw * fxRate : null;
+  const yahooDebt = finite(quote?.totalDebt) ? quote.totalDebt : null;
+  const yahooCash = finite(quote?.totalCash) ? quote.totalCash : null;
+  let debt = secDebt;
+  let cash = secCash;
+  let debtSource = finite(secDebt) ? "SEC debt reconciliation" : "Unavailable";
+  let cashSource = finite(secCash) ? "SEC cash and liquid investments" : "Unavailable";
+  const notes = [];
+
+  if (!finite(debt) && finite(yahooDebt)) {
+    debt = yahooDebt;
+    debtSource = "Yahoo Finance total debt fallback";
+    notes.push("SEC debt was unavailable; Yahoo total debt was used.");
+  } else if (finite(debt) && finite(yahooDebt) && yahooDebt > debt * 2 && yahooDebt - debt > 5_000_000_000) {
+    debt = yahooDebt;
+    debtSource = "Yahoo Finance total debt (material SEC discrepancy)";
+    notes.push("Yahoo total debt materially exceeded the SEC-tagged amount; the higher Yahoo figure was used.");
+  }
+
+  if (!finite(cash) && finite(yahooCash)) {
+    cash = yahooCash;
+    cashSource = "Yahoo Finance total cash fallback";
+    notes.push("SEC liquid cash was unavailable; Yahoo total cash was used.");
+  } else if (finite(cash) && finite(yahooCash) && yahooCash > cash * 1.15) {
+    cash = yahooCash;
+    cashSource = "Yahoo Finance total cash (includes additional liquid investments)";
+    notes.push("Yahoo total cash materially exceeded the SEC cash fact and was used as the broader liquid-cash measure.");
+  }
+
+  return { debt, cash, debtSource, cashSource, notes, reconciled: notes.length > 0 };
 }
 
 function computeQuality(rows, normalized, currentPrice = null) {
@@ -304,25 +366,31 @@ async function analyzeTicker(rawTicker, options = {}) {
   const financialCurrency = extracted.financialCurrency || "USD";
   const quoteCurrency = quoteResult.currency || "USD";
   let fxRate = 1.0;
+  let currencyConversionValid = hasUsdQuote;
   if (financialCurrency !== "USD" && quoteCurrency === "USD") {
-    fxRate = await fetchExchangeRate(financialCurrency, "USD").catch(() => 1.0);
+    try {
+      fxRate = await fetchExchangeRate(financialCurrency, "USD");
+      currencyConversionValid = finite(fxRate) && fxRate > 0 && fxRate !== 1;
+    } catch {
+      currencyConversionValid = false;
+    }
   }
 
   // Convert financial statement figures if filing currency differs from stock quote currency
   if (fxRate !== 1.0) {
     rows = rows.map((r) => ({
       ...r,
-      revenue: r.revenue ? r.revenue * fxRate : null,
-      ocf: r.ocf ? r.ocf * fxRate : null,
-      capex: r.capex ? r.capex * fxRate : null,
-      capexTangible: r.capexTangible ? r.capexTangible * fxRate : null,
-      capexIntangible: r.capexIntangible ? r.capexIntangible * fxRate : null,
-      fcf: r.fcf ? r.fcf * fxRate : null,
-      fcfEconomic: r.fcfEconomic ? r.fcfEconomic * fxRate : null,
-      dna: r.dna ? r.dna * fxRate : null,
-      interest: r.interest ? r.interest * fxRate : null,
-      sbc: r.sbc ? r.sbc * fxRate : null,
-      buybackCash: r.buybackCash ? r.buybackCash * fxRate : null
+      revenue: finite(r.revenue) ? r.revenue * fxRate : null,
+      ocf: finite(r.ocf) ? r.ocf * fxRate : null,
+      capex: finite(r.capex) ? r.capex * fxRate : null,
+      capexTangible: finite(r.capexTangible) ? r.capexTangible * fxRate : null,
+      capexIntangible: finite(r.capexIntangible) ? r.capexIntangible * fxRate : null,
+      fcf: finite(r.fcf) ? r.fcf * fxRate : null,
+      fcfEconomic: finite(r.fcfEconomic) ? r.fcfEconomic * fxRate : null,
+      dna: finite(r.dna) ? r.dna * fxRate : null,
+      interest: finite(r.interest) ? r.interest * fxRate : null,
+      sbc: finite(r.sbc) ? r.sbc * fxRate : null,
+      buybackCash: finite(r.buybackCash) ? r.buybackCash * fxRate : null
     }));
     normalized = normalize(rows);
     normalized5y = normalize(rows, 5);
@@ -333,24 +401,6 @@ async function analyzeTicker(rawTicker, options = {}) {
   const shares = shareSelection.shares;
   const price = finite(Number(options.price)) ? Number(options.price) : quoteResult.price;
   const quality = computeQuality(rows, normalized, price);
-  const latestRow = rows[0] || {};
-  const ttm = {
-    period: "TTM",
-    year: "TTM",
-    revenue: latestRow.revenue,
-    ocf: latestRow.ocf,
-    capex: latestRow.capex,
-    capexTangible: latestRow.capexTangible,
-    capexIntangible: latestRow.capexIntangible,
-    fcf: latestRow.fcf,
-    sbc: latestRow.sbc,
-    fcfEconomic: latestRow.fcfEconomic,
-    dna: latestRow.dna,
-    shares: shares,
-    fcfMargin: latestRow.fcfMargin,
-    fcfEconomicMargin: latestRow.fcfEconomicMargin,
-    isTtm: true
-  };
   const suppliedMarketCap = finite(Number(options.marketCap)) && Number(options.marketCap) > 0 ? Number(options.marketCap) : null;
   const yahooMarketCap = finite(Number(quoteResult?.marketCap)) && Number(quoteResult.marketCap) > 0 ? Number(quoteResult.marketCap) : null;
   const liveShares = finite(Number(quoteResult?.shares)) && Number(quoteResult.shares) > 0 ? Number(quoteResult.shares) : null;
@@ -373,37 +423,47 @@ async function analyzeTicker(rawTicker, options = {}) {
     marketCapSource = finite(marketCap) ? `${shareSelection.source} × current price` : "Unavailable";
   }
 
-  // Convert debt and cash if filing currency differs from quote currency
-  const rawDebt = debtValue(extracted.latest);
-  const rawShortDebt = extracted.latest.shortDebt?.val ?? 0;
-  const rawCash = extracted.latest.cash?.val ?? null;
-  const debt = (rawDebt !== null && fxRate !== 1.0) ? rawDebt * fxRate : rawDebt;
-  const shortDebt = (rawShortDebt !== 0 && fxRate !== 1.0) ? rawShortDebt * fxRate : rawShortDebt;
-  const cash = (rawCash !== null && fxRate !== 1.0) ? rawCash * fxRate : rawCash;
+  const balanceSheet = reconcileBalanceSheet(extracted.latest, quoteResult, fxRate);
+  const debt = balanceSheet.debt;
+  const cash = balanceSheet.cash;
+  const rawShortDebt = extracted.latest.shortDebt?.val;
+  const shortDebt = finite(rawShortDebt) ? rawShortDebt * fxRate : null;
   const netDebt = finite(debt) && finite(cash) ? debt - cash : null;
   const enterpriseValue = finite(marketCap) && finite(netDebt) ? marketCap + netDebt : null;
-  
-  // Unlevered FCF: Add back after-tax net interest (using 21% standard tax rate)
-  const latestInterest = rows[0]?.interest ?? 0;
+
+  // Normalize interest over the same lookback as FCF before the after-tax add-back.
   const taxRate = 0.21;
-  const nfcf = normalized.normalizedFcf;
-  const economicNfcf = normalized.normalizedEconomicFcf;
-  const unleveredNfcf = finite(nfcf) && nfcf > 0
-    ? nfcf + (latestInterest * (1 - taxRate))
-    : null;
+  function lookbackValuation(norm) {
+    const nfcf = norm.normalizedFcf;
+    const economicNfcf = norm.normalizedEconomicFcf;
+    const unleveredNfcf = finite(nfcf) && nfcf > 0
+      ? nfcf + Math.max(0, norm.averageInterest || 0) * (1 - taxRate)
+      : null;
+    return {
+      normalizedFcf: nfcf,
+      normalizedEconomicFcf: economicNfcf,
+      normalizedInterest: norm.averageInterest,
+      unleveredNfcf,
+      priceToNfcf: finite(marketCap) && finite(nfcf) && nfcf > 0 ? marketCap / nfcf : null,
+      priceToEconomicNfcf: finite(marketCap) && finite(economicNfcf) && economicNfcf > 0 ? marketCap / economicNfcf : null,
+      evToUnleveredNfcf: finite(enterpriseValue) && finite(unleveredNfcf) && unleveredNfcf > 0 ? enterpriseValue / unleveredNfcf : null,
+      fcfYield: finite(marketCap) && marketCap > 0 && finite(nfcf) ? nfcf / marketCap : null,
+      economicFcfYield: finite(marketCap) && marketCap > 0 && finite(economicNfcf) ? economicNfcf / marketCap : null,
+      netDebtToNfcf: finite(netDebt) && finite(nfcf) && nfcf > 0 ? netDebt / nfcf : null
+    };
+  }
+  const lookbacks = { all: lookbackValuation(normalized), 5: lookbackValuation(normalized5y), 3: lookbackValuation(normalized3y) };
+  const fullValuation = lookbacks.all;
 
   const valuation = {
-    price, shares: effectiveShares, shareSource: yahooMarketCap ? "Yahoo Finance market cap ÷ price" : shareSelection.source, marketCap, marketCapSource, debt, shortDebt, cash, netDebt, enterpriseValue,
-    priceToNfcf: finite(marketCap) && finite(nfcf) && nfcf > 0 ? marketCap / nfcf : null,
-    priceToEconomicNfcf: finite(marketCap) && finite(economicNfcf) && economicNfcf > 0 ? marketCap / economicNfcf : null,
-    evToUnleveredNfcf: finite(enterpriseValue) && finite(unleveredNfcf) && unleveredNfcf > 0 ? enterpriseValue / unleveredNfcf : null,
-    evToNfcf: finite(enterpriseValue) && finite(nfcf) && nfcf > 0 ? enterpriseValue / nfcf : null, // legacy
-    fcfYield: finite(marketCap) && marketCap > 0 && finite(nfcf) ? nfcf / marketCap : null,
-    economicFcfYield: finite(marketCap) && marketCap > 0 && finite(economicNfcf) ? economicNfcf / marketCap : null,
+    price, shares: effectiveShares, shareSource: yahooMarketCap ? "Yahoo Finance market cap ÷ price" : shareSelection.source, marketCap, marketCapSource,
+    debt, debtSource: balanceSheet.debtSource, shortDebt, cash, cashSource: balanceSheet.cashSource, netDebt, enterpriseValue,
+    ...fullValuation,
+    lookbacks,
+    evToNfcf: finite(enterpriseValue) && finite(normalized.normalizedFcf) && normalized.normalizedFcf > 0 ? enterpriseValue / normalized.normalizedFcf : null,
     averageFcfYield: finite(marketCap) && marketCap > 0 && finite(normalized.averageAnnualFcf) ? normalized.averageAnnualFcf / marketCap : null,
     latestFcfYield: finite(marketCap) && marketCap > 0 && finite(normalized.latestReportedFcf) ? normalized.latestReportedFcf / marketCap : null,
-    netDebtToNfcf: finite(netDebt) && finite(nfcf) && nfcf > 0 ? netDebt / nfcf : null,
-    shortDebtToCash: finite(cash) && cash > 0 && shortDebt > 0 ? shortDebt / cash : null
+    shortDebtToCash: finite(cash) && cash > 0 && finite(shortDebt) && shortDebt > 0 ? shortDebt / cash : null
   };
 
   const warnings = [];
@@ -411,20 +471,23 @@ async function analyzeTicker(rawTicker, options = {}) {
   if (!hasUsdQuote) warnings.push(`Price is quoted in ${quoteResult.currency}; version one only values USD-quoted securities.`);
   if (normalized.usableYears < 6) warnings.push(`Only ${normalized.usableYears} usable annual periods; six are required.`);
   if (!finite(price)) warnings.push("Current price is unavailable.");
-  if (!finite(shares)) warnings.push("Current share count is unavailable.");
+  if (!finite(effectiveShares)) warnings.push("Current share count is unavailable.");
   if (shareSelection.inconsistent && !suppliedMarketCap) warnings.push(`SEC instant shares (${round(shareSelection.instant)}) differ materially from annual diluted shares (${round(shareSelection.annual)}); valuation uses the annual diluted figure.`);
   if (finite(valuation.fcfYield) && valuation.fcfYield > 0.50) warnings.push("Normalized FCF yield exceeds 50%; verify market capitalization and cash-flow facts before relying on valuation.");
   if (finite(valuation.fcfYield) && valuation.fcfYield > 0.25) warnings.push("Elevated FCF yield (>25%): deep value opportunity or potential distress; inspect balance sheet and business durability.");
-  if (!finite(extracted.latest.cash?.val) || !finite(debt)) warnings.push("Cash or debt data is incomplete.");
+  if (!finite(cash) || !finite(debt)) warnings.push("Cash or debt data is incomplete; the company cannot qualify automatically.");
+  warnings.push(...balanceSheet.notes);
   
   if (fxRate !== 1.0) {
     warnings.push(`Financial statements reported in ${financialCurrency} converted to ${quoteCurrency} at exchange rate ~${round(fxRate, 4)}.`);
+  } else if (!currencyConversionValid) {
+    warnings.push(`Could not safely convert ${financialCurrency} financial statements into ${quoteCurrency}; valuation cannot qualify automatically.`);
   }
 
   // Solvency check: Near-term debt vs. liquidity
   const cashVal = cash || 0;
   const annualCashGeneration = Math.max(0, normalized.latestReportedFcf || 0);
-  const immediateDebtRisk = shortDebt > 0 && shortDebt > (cashVal + annualCashGeneration);
+  const immediateDebtRisk = finite(shortDebt) && shortDebt > 0 && shortDebt > (cashVal + annualCashGeneration);
   if (immediateDebtRisk) {
     warnings.push(`High near-term debt maturity: Short-term debt ($${compactStr(shortDebt)}) exceeds cash ($${compactStr(cashVal)}) plus annual FCF ($${compactStr(annualCashGeneration)}).`);
   }
@@ -462,48 +525,29 @@ async function analyzeTicker(rawTicker, options = {}) {
   const valuationSane = finite(marketCap) && marketCap >= 10_000_000 && finite(valuation.fcfYield) && valuation.fcfYield > 0 && valuation.fcfYield <= 0.50;
   if (!valuationSane) warnings.push("Valuation failed sanity thresholds (market cap >= $10M and FCF yield between 0% and 50%) and cannot qualify automatically.");
 
-  // User-Controlled Criteria from options.criteria (Single global maxMultiple, no market cap bucket override)
-  const toNum = (v) => (v !== null && v !== undefined && !isNaN(Number(v))) ? Number(v) : null;
-  const crit = options.criteria || {};
-  const maxMultiple = toNum(crit.maxMultiple) ?? 15;
-  const maxEvMultiple = toNum(crit.maxEvMultiple);
-  const minYears = toNum(crit.minYears) ?? 6;
-  const maxDebt = toNum(crit.maxDebt) ?? 4.0;
-  const maxDilution = toNum(crit.maxDilution) ?? 0.25;
-  const minPosRatio = toNum(crit.minPosFcf) ?? 0.67;
-  const excludeFin = crit.excludeFinancials !== undefined ? Boolean(crit.excludeFinancials) : true;
-  const enforceSolv = crit.enforceSolvency !== undefined ? Boolean(crit.enforceSolvency) : true;
-
-  const requireMarginAgreement = crit.requireMarginAgreement === true;
-  const marginPass = !requireMarginAgreement || normalized.marginAgreement;
-
-  const minMc = toNum(crit.minMarketCap) ?? 0;
-  const maxMc = toNum(crit.maxMarketCap) ?? Infinity;
-  const mcInRange = (!minMc || marketCap >= minMc) && (!isFinite(maxMc) || marketCap <= maxMc);
-  const evPass = !Number.isFinite(maxEvMultiple) || (finite(valuation.evToUnleveredNfcf) && valuation.evToUnleveredNfcf <= maxEvMultiple);
-
-  const passes = (!excludeFin || !isFinancial) && hasUsdQuote && valuationSane && marginPass && mcInRange && evPass &&
-    normalized.usableYears >= minYears &&
-    (!finite(quality.positiveFcfRatio) || quality.positiveFcfRatio >= minPosRatio) &&
-    finite(valuation.priceToNfcf) && valuation.priceToNfcf <= maxMultiple &&
-    (!finite(valuation.netDebtToNfcf) || valuation.netDebtToNfcf <= maxDebt) &&
-    (!enforceSolv || !immediateDebtRisk) &&
-    (!finite(quality.shareChange) || quality.shareChange <= maxDilution);
-
   const filing = latestFiling(submissions);
-  return {
+  const criticalMissing = [debt, cash, effectiveShares, quality.latestSbcToFcf, normalized.normalizedEconomicFcf].some((item) => !finite(item)) || !currencyConversionValid;
+  const evidenceConfidence = {
+    level: criticalMissing ? "Unsafe" : balanceSheet.reconciled ? "Reconciled" : normalized.usableYears < 6 ? "Partial" : "Complete",
+    criticalMissing,
+    balanceSheetReconciled: balanceSheet.reconciled,
+    currencyConversionValid
+  };
+  const report = {
     ticker, companyName: submissions.name || company.title, cik: company.cik,
     company: { sic: submissions.sic || null, sicDescription: submissions.sicDescription || null, fiscalYearEnd: submissions.fiscalYearEnd || null, exchanges: submissions.exchanges || [], tickers: submissions.tickers || [] },
     quote: quoteResult,
+    quoteCurrency,
+    financialCurrency,
+    currencyConversionValid,
+    isFinancial,
     rows,
-    ttm,
     normalized,
     normalized5y,
     normalized3y,
     quality,
     valuation,
-    status: passes ? "Idea" : normalized.usableYears < minYears || (excludeFin && isFinancial) ? "Excluded" : "Review",
-    passesDefaultIdeaFilter: passes,
+    evidenceConfidence,
     warnings,
     filing: filing ? { ...filing, url: filingUrl(company.cik, filing) } : null,
     methodology: {
@@ -517,10 +561,17 @@ async function analyzeTicker(rawTicker, options = {}) {
       price: quoteResult.source,
       shares: shareSelection.source,
       marketCap: marketCapSource,
+      debt: balanceSheet.debtSource,
+      cash: balanceSheet.cashSource,
       financialTags: Object.fromEntries(Object.entries(extracted.series).map(([key, value]) => [key, value.tag]))
     },
     analyzedAt: new Date().toISOString()
   };
+  const evaluation = evaluateCandidate(report, options.criteria || {});
+  report.evaluation = evaluation;
+  report.status = evaluation.status;
+  report.passesDefaultIdeaFilter = evaluation.status === "Idea";
+  return report;
 }
 
 function compactStr(val) {
@@ -532,6 +583,10 @@ function compactStr(val) {
 function summary(report) {
   return {
     ticker: report.ticker, companyName: report.companyName, status: report.status,
+    sic: Number(report.company?.sic) || null,
+    isFinancial: report.isFinancial,
+    quoteCurrency: report.quoteCurrency,
+    currencyConversionValid: report.currencyConversionValid,
     price: round(report.valuation.price), marketCap: round(report.valuation.marketCap),
     priceToNfcf: round(report.valuation.priceToNfcf),
     priceToEconomicNfcf: round(report.valuation.priceToEconomicNfcf),
@@ -542,10 +597,16 @@ function summary(report) {
     averageFcfYield: round(report.valuation.averageFcfYield, 4),
     latestFcfYield: round(report.valuation.latestFcfYield, 4),
     latestRevenue: round(report.normalized.latestRevenue),
+    latestFcf: round(report.normalized.latestReportedFcf),
     averageAnnualFcf: round(report.normalized.averageAnnualFcf),
     normalizedFcf: round(report.normalized.normalizedFcf),
     normalizedFcf5y: round(report.normalized5y?.normalizedFcf),
     normalizedFcf3y: round(report.normalized3y?.normalizedFcf),
+    normalizedEconomicFcf5y: round(report.normalized5y?.normalizedEconomicFcf),
+    normalizedEconomicFcf3y: round(report.normalized3y?.normalizedEconomicFcf),
+    normalizedInterest: round(report.normalized?.averageInterest),
+    normalizedInterest5y: round(report.normalized5y?.averageInterest),
+    normalizedInterest3y: round(report.normalized3y?.averageInterest),
     blendedMargin5y: round(report.normalized5y?.blendedMargin, 4),
     priceToNfcf5y: round(report.valuation.price && report.normalized5y?.normalizedFcf > 0 ? report.valuation.marketCap / report.normalized5y.normalizedFcf : null),
     normalizedEconomicFcf: round(report.normalized.normalizedEconomicFcf),
@@ -566,12 +627,18 @@ function summary(report) {
     buybackPrice: round(report.quality.buybackAudit?.averageBuybackPrice, 2),
     buybackRating: report.quality.buybackAudit?.rating || "N/A",
     netDebtToNfcf: round(report.valuation.netDebtToNfcf),
+    netDebt: round(report.valuation.netDebt),
+    enterpriseValue: round(report.valuation.enterpriseValue),
+    debt: round(report.valuation.debt),
     shortDebt: round(report.valuation.shortDebt),
     cash: round(report.valuation.cash),
+    shares: round(report.valuation.shares),
     shareChange: round(report.quality.shareChange, 4),
     latestSbcToRevenue: round(report.quality.latestSbcToRevenue, 4),
     latestSbcToFcf: round(report.quality.latestSbcToFcf, 4),
     warnings: report.warnings,
+    evidenceConfidence: report.evidenceConfidence,
+    evaluation: report.evaluation,
     passesDefaultIdeaFilter: report.passesDefaultIdeaFilter,
     analyzedAt: report.analyzedAt
   };
@@ -600,4 +667,4 @@ async function analyzeBatch(tickers, options = {}) {
   return { results, reports, failures };
 }
 
-module.exports = { annualRows, normalize, computeQuality, selectValuationShares, analyzeTicker, analyzeBatch, summary };
+module.exports = { annualRows, normalize, computeQuality, selectValuationShares, debtValue, reconcileBalanceSheet, analyzeTicker, analyzeBatch, summary };

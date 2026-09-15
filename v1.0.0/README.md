@@ -4,6 +4,8 @@ A from-scratch, Vercel-ready normalized free-cash-flow idea screener. Multiple m
 
 The website and Mac app share this same codebase. Changes pushed to GitHub continue to deploy to the website through Vercel, while a new Mac build can be created from the same version whenever needed.
 
+For hosted deployments, set `SEC_USER_AGENT` to an identifying application name and monitored contact email before making SEC requests.
+
 ## Running the Mac app
 
 From the `v1.0.0` folder:
@@ -48,4 +50,7 @@ The `.github/workflows/mac-release.yml` workflow runs on `v*` tags, builds the M
 - **Solvency & Near-Term Debt Test**: Flags companies where short-term debt due within 12 months exceeds available cash + annual cash generation
 - **Under-Investment Diagnostic**: Compares cumulative CapEx against cumulative Depreciation & Amortization
 - Detailed single-company reports and calculation audits
+- Evidence-confidence gating with explicit pass, fail, exclusion, and unknown reasons
+- Per-year XBRL provenance (hover an annual period in a company report)
+- Working 3-year, 5-year, and full-history screening lookbacks
 - CSV export and local storage persistence

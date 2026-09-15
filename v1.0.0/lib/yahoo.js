@@ -207,34 +207,13 @@ async function fetchExchangeRate(from, to) {
   const t = String(to).toUpperCase();
   if (f === "USD" && t === "USD") return 1.0;
 
-  try {
-    if (f === "JPY" && t === "USD") {
-      const q = await fetchYahooQuote("USDJPY=X");
-      if (q && q.price > 0) return 1.0 / q.price;
-      return 1.0 / 150.0;
-    }
-    if (f === "EUR" && t === "USD") {
-      const q = await fetchYahooQuote("EURUSD=X");
-      if (q && q.price > 0) return q.price;
-      return 1.08;
-    }
-    if (f === "GBP" && t === "USD") {
-      const q = await fetchYahooQuote("GBPUSD=X");
-      if (q && q.price > 0) return q.price;
-      return 1.30;
-    }
-    if (f === "CAD" && t === "USD") {
-      const q = await fetchYahooQuote("USDCAD=X");
-      if (q && q.price > 0) return 1.0 / q.price;
-      return 1.0 / 1.36;
-    }
-  } catch (e) {}
-
-  if (f === "JPY" && t === "USD") return 1.0 / 150.0;
-  if (f === "EUR" && t === "USD") return 1.08;
-  if (f === "GBP" && t === "USD") return 1.30;
-  if (f === "CAD" && t === "USD") return 0.74;
-  return 1.0;
+  const direct = await fetchYahooQuote(`${f}${t}=X`).catch(() => null);
+  if (finite(direct?.price) && direct.price > 0) return direct.price;
+  const inverse = await fetchYahooQuote(`${t}${f}=X`).catch(() => null);
+  if (finite(inverse?.price) && inverse.price > 0) return 1 / inverse.price;
+  const error = new Error(`Live ${f}/${t} exchange rate is unavailable.`);
+  error.statusCode = 502;
+  throw error;
 }
 
 module.exports = { SOURCES, fetchYahooQuote, fetchYahooUniverse, fetchExchangeRate };

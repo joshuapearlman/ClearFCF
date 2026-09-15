@@ -54,6 +54,7 @@ http.createServer(async (req, rawRes) => {
     const names = {
     "/": "index.html",
     "/app.js": "app.js",
+    "/screening.js": "../lib/screening.js",
     "/styles.css": "styles.css",
     "/audit.css": "audit.css",
     "/favicon.ico": "favicon.ico",
@@ -68,7 +69,7 @@ http.createServer(async (req, rawRes) => {
   const name = names[url.pathname];
   if (!name) { rawRes.statusCode = 404; return rawRes.end("Not found"); }
 
-  const filePath = path.join(publicDir, name);
+  const filePath = path.resolve(publicDir, name);
   if (!fs.existsSync(filePath)) {
     rawRes.statusCode = 404;
     return rawRes.end("Not found: " + name);

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Transparent normalized free-cash-flow stock idea screener.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'">
   <title>Clear FCF Screener | by Joshua Pearlman</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -139,7 +140,7 @@
             </div>
             <div class="tol-item">
               <div class="tol-label"><span>Min Positive FCF Years</span> <strong id="tol-posfcf-val">67%</strong></div>
-              <input type="range" id="tol-posfcf" min="40" max="100" step="5" value="67">
+              <input type="range" id="tol-posfcf" min="40" max="100" step="1" value="67">
             </div>
             <div class="tol-item tol-toggle-item">
               <label class="checkbox-label"><input type="checkbox" id="tol-solvency" checked> Enforce Near-Term Debt Solvency</label>
@@ -255,6 +256,7 @@
     </div>
   </footer>
 
+  <script src="/screening.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>
