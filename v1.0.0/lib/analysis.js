@@ -685,8 +685,8 @@ async function analyzeBatch(tickers, options = {}) {
       } catch (error) {
         failures.push({ ticker, error: error.message || "Analysis failed." });
       }
-      // Option A: 350ms pacing delay between ticker analyses to prevent rate limiting
-      await new Promise((r) => setTimeout(r, 350));
+      // Pace ticker analyses to reduce the risk of Yahoo/SEC rate limiting.
+      await new Promise((r) => setTimeout(r, 300));
     }
   }
   await Promise.all(Array.from({ length: workers }, worker));

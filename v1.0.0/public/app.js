@@ -695,7 +695,7 @@ async function runAuto() {
     scan.allExamined = scan.allExamined || [];
 
     while (scan.cursor < max && !state.stopped) {
-      const batchRows = scan.symbols.slice(scan.cursor, scan.cursor + 5);
+      const batchRows = scan.symbols.slice(scan.cursor, scan.cursor + 8);
       scan.cursor += batchRows.length;
       const unreviewedRows = batchRows.filter((item) => !reviewed.has(item.ticker));
       if (!unreviewedRows.length) {
