@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { evaluateCandidate, selectedMetrics } = require("../lib/screening");
+const { evaluateCandidate, selectedMetrics } = require("../public/screening");
 
 function completeReport() {
   return {

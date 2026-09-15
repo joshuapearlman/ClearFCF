@@ -8,7 +8,7 @@
     "rewrites": [
     { "source": "/", "destination": "/public/index.html" },
     { "source": "/app.js", "destination": "/public/app.js" },
-    { "source": "/screening.js", "destination": "/lib/screening.js" },
+    { "source": "/screening.js", "destination": "/public/screening.js" },
     { "source": "/styles.css", "destination": "/public/styles.css" },
     { "source": "/audit.css", "destination": "/public/audit.css" },
     { "source": "/favicon.ico", "destination": "/public/favicon.ico" },

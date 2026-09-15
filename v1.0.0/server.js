@@ -54,7 +54,7 @@ http.createServer(async (req, rawRes) => {
     const names = {
     "/": "index.html",
     "/app.js": "app.js",
-    "/screening.js": "../lib/screening.js",
+    "/screening.js": "screening.js",
     "/styles.css": "styles.css",
     "/audit.css": "audit.css",
     "/favicon.ico": "favicon.ico",

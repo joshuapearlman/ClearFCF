@@ -3,7 +3,7 @@
 const { fetchSecCompany, extractFinancials } = require("./sec");
 const { fetchYahooQuote, fetchYahooFinancials, fetchExchangeRate } = require("./yahoo");
 const { finite, round, median, standardDeviation } = require("./utils");
-const { evaluateCandidate } = require("./screening");
+const { evaluateCandidate } = require("../public/screening");
 
 function valueForYear(series, year) {
   return series?.values?.get(year)?.val ?? null;

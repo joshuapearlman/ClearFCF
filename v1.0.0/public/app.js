@@ -3,6 +3,10 @@
 const $ = (selector) => document.querySelector(selector);
 const screening = window.ClearFcfScreening;
 
+if (!screening?.evaluateCandidate) {
+  throw new Error("ClearFCF screening module failed to load. Refresh the page to load the latest application files.");
+}
+
 const MC_LEVELS = [0, 500e6, 1e9, 2e9, 5e9, 10e9, 50e9, 100e9, 500e9];
 const MC_LEVEL_LABELS = ["$0 (All)", "$500M", "$1B", "$2B", "$5B", "$10B", "$50B", "$100B", "$500B"];
 
