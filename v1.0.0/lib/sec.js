@@ -2,10 +2,14 @@
 
 const { fetchJson, finite } = require("./utils");
 
-const SEC_AGENT = process.env.SEC_USER_AGENT || "ClearFCF/1.0 (https://github.com/joshuapearlman/ClearFCF)";
+const SEC_CONTACT_EMAIL = process.env.SEC_CONTACT_EMAIL || "joshuapearlman45@gmail.com";
+const SEC_AGENT = process.env.SEC_USER_AGENT || `ClearFCF/1.0 ${SEC_CONTACT_EMAIL}`;
 const SEC_HEADERS = { "User-Agent": SEC_AGENT, Accept: "application/json", "Accept-Encoding": "gzip, deflate" };
 const cache = new Map();
 const CACHE_MS = 6 * 60 * 60 * 1000;
+const SEC_MIN_INTERVAL_MS = 200;
+let secRequestQueue = Promise.resolve();
+let nextSecRequestAt = 0;
 
 const TAGS = {
   revenue: [
@@ -64,9 +68,24 @@ async function cached(key, loader) {
   return value;
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchSecJson(url) {
+  const request = secRequestQueue.then(async () => {
+    const delay = Math.max(0, nextSecRequestAt - Date.now());
+    if (delay) await wait(delay);
+    nextSecRequestAt = Date.now() + SEC_MIN_INTERVAL_MS;
+    return fetchJson(url, { headers: SEC_HEADERS });
+  });
+  secRequestQueue = request.catch(() => undefined);
+  return request;
+}
+
 async function tickerMap() {
   return cached("ticker-map", async () => {
-    const data = await fetchJson("https://www.sec.gov/files/company_tickers.json", { headers: SEC_HEADERS });
+    const data = await fetchSecJson("https://www.sec.gov/files/company_tickers.json");
     return new Map(Object.values(data).map((item) => [String(item.ticker).toUpperCase(), item]));
   });
 }
@@ -87,8 +106,8 @@ async function fetchSecCompany(ticker) {
   // Do NOT cache raw multi-megabyte facts in memory across serverless requests.
   // Letting them fall out of scope allows V8 to garbage-collect them immediately.
   const [facts, submissions] = await Promise.all([
-    fetchJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${company.cik}.json`, { headers: SEC_HEADERS }),
-    fetchJson(`https://data.sec.gov/submissions/CIK${company.cik}.json`, { headers: SEC_HEADERS })
+    fetchSecJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${company.cik}.json`),
+    fetchSecJson(`https://data.sec.gov/submissions/CIK${company.cik}.json`)
   ]);
   return { company, facts, submissions };
 }

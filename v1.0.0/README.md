@@ -4,7 +4,7 @@ A from-scratch, Vercel-ready normalized free-cash-flow idea screener. Multiple m
 
 The website and Mac app share this same codebase. Changes pushed to GitHub continue to deploy to the website through Vercel, while a new Mac build can be created from the same version whenever needed.
 
-For hosted deployments, set `SEC_USER_AGENT` to an identifying application name and monitored contact email before making SEC requests.
+SEC requests default to ClearFCF's monitored contact address and are throttled to five requests per second per server process. For hosted deployments, set `SEC_CONTACT_EMAIL` to a monitored address, or set the complete `SEC_USER_AGENT` value (for example, `ClearFCF/1.0 owner@example.com`).
 
 ## Running the Mac app
 
