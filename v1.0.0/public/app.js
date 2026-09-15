@@ -67,6 +67,7 @@ const state = {
   activeFilters: new Set(),
   sortKey: 'priceToNfcf',
   sortAsc: true,
+  showMoreMetrics: false,
   activePreset: "default",
   criteria: { ...PRESETS.default }
 };
@@ -148,6 +149,27 @@ function percent(value) {
   return typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : "—";
 }
 
+function formatDuration(totalSeconds) {
+  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "Calculating…";
+  const seconds = Math.round(totalSeconds);
+  if (seconds < 60) return `${seconds}s`;
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.ceil((seconds % 3600) / 60);
+  return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
+function initialIdeaEmptyHtml() {
+  return `<div class="empty-state">
+    <div class="empty-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+    <p class="kicker">Your research queue starts here</p>
+    <h3>Find durable cash flow at a sensible price</h3>
+    <p>Choose a universe and start a scan. ClearFCF will evaluate each company, preserve the evidence, and surface only the candidates that pass your criteria.</p>
+    <div class="example-result" aria-label="Example result">
+      <span class="ticker">EXAMPLE</span><span class="badge idea">Idea</span><span><small>P/nFCF</small> 11.8x</span><span><small>FCF yield</small> 8.5%</span>
+    </div>
+  </div>`;
+}
+
 async function request(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
@@ -182,38 +204,45 @@ document.querySelectorAll(".nav-button").forEach((button) => {
 });
 
 function tableHtml(results, title) {
-  if (!results.length) return `<div class="results-shell"><div class="empty">No results matching current criteria.</div></div>`;
-  return `<div class="results-shell">
+  if (!results.length) return `<div class="results-shell"><div class="empty-state compact-empty filtered-empty">
+    <div class="empty-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+    <h3>No candidates match the active criteria</h3>
+    <p>Try clearing a quick filter or widening the screening tolerances. Examined companies remain saved.</p>
+  </div></div>`;
+  return `<div class="results-shell ${state.showMoreMetrics ? "show-more" : ""}">
     <div class="results-head">
       <h2>${escapeHtml(title)} <small>(${results.length})</small></h2>
-      <button class="export" type="button">Export CSV</button>
+      <div class="results-tools">
+        <button class="metrics-toggle" type="button" data-more-metrics aria-expanded="${state.showMoreMetrics}">${state.showMoreMetrics ? "Fewer metrics" : "More metrics"}</button>
+        <button class="export" type="button">Export CSV</button>
+      </div>
     </div>
     <div class="table-scroll">
       <table>
         <thead>
           <tr>
-            <th>Action</th>
-            <th class="sortable" data-sort="ticker">Company</th>
-            <th class="sortable" data-sort="status">Status</th>
+            <th class="col-action">Action</th>
+            <th class="sortable col-company" data-sort="ticker">Company</th>
+            <th class="sortable col-status" data-sort="status">Status</th>
             <th class="sortable" data-sort="price">Price</th>
             <th class="sortable" data-sort="marketCap">Market cap</th>
             <th class="sortable" data-sort="priceToNfcf">P/nFCF</th>
-            <th class="sortable" data-sort="priceToEconomicNfcf">P/Econ nFCF</th>
-            <th class="sortable" data-sort="evToUnleveredNfcf">EV/Unlevered</th>
+            <th class="sortable optional-metric" data-sort="priceToEconomicNfcf">P/Econ nFCF</th>
+            <th class="sortable optional-metric" data-sort="evToUnleveredNfcf">EV/Unlevered</th>
             <th class="sortable" data-sort="fcfYield">FCF yield</th>
-            <th class="sortable" data-sort="economicFcfYield">Econ yield</th>
-            <th class="sortable" data-sort="fcfTrajectory">FCF Trend</th>
-            <th class="sortable" data-sort="buybackRating">Buyback Audit</th>
-            <th class="sortable" data-sort="capexToDnaRatio">CapEx/D&A</th>
+            <th class="sortable optional-metric" data-sort="economicFcfYield">Econ yield</th>
+            <th class="sortable optional-metric" data-sort="fcfTrajectory">FCF Trend</th>
+            <th class="sortable optional-metric" data-sort="buybackRating">Buyback Audit</th>
+            <th class="sortable optional-metric" data-sort="capexToDnaRatio">CapEx/D&A</th>
             <th class="sortable" data-sort="usableYears">History</th>
-            <th class="sortable" data-sort="netDebtToNfcf">Net debt/nFCF</th>
-            <th class="sortable" data-sort="latestSbcToFcf">SBC/FCF</th>
+            <th class="sortable optional-metric" data-sort="netDebtToNfcf">Net debt/nFCF</th>
+            <th class="sortable optional-metric" data-sort="latestSbcToFcf">SBC/FCF</th>
           </tr>
         </thead>
         <tbody>
           ${results.map((row) => `<tr data-ticker="${escapeHtml(row.ticker)}">
-            <td><button class="btn-action btn-dismiss" data-dismiss="${escapeHtml(row.ticker)}" title="Dismiss this stock from future scans">✕ Pass</button></td>
-            <td>
+            <td class="col-action"><button class="btn-action btn-dismiss" data-dismiss="${escapeHtml(row.ticker)}" title="Dismiss this stock from future scans">✕ Pass</button></td>
+            <td class="col-company">
               <span class="ticker">${escapeHtml(row.ticker)}</span>
               <span class="subname">${escapeHtml(row.companyName)}</span>
               ${row.netDebtToNfcf !== null && row.netDebtToNfcf < 0 ? '<span class="badge badge-netcash" title="Net cash position">Net Cash</span>' : ''}
@@ -221,20 +250,20 @@ function tableHtml(results, title) {
               ${row.buybackRating === 'Accretive' ? '<span class="badge badge-blue" title="Historical buybacks executed at a discount">Accretive Buyback</span>' : ''}
               ${row.latestSbcToFcf && row.latestSbcToFcf > 0.25 ? '<span class="badge badge-amber" title="SBC absorbs >25% of FCF">High SBC</span>' : ''}
             </td>
-            <td title="${escapeHtml([...(row.evaluation?.exclusions || []), ...(row.evaluation?.failures || []), ...(row.evaluation?.unknowns || [])].join("\n"))}"><span class="badge ${String(row.status).toLowerCase()}">${escapeHtml(row.status)}</span></td>
+            <td class="col-status" title="${escapeHtml([...(row.evaluation?.exclusions || []), ...(row.evaluation?.failures || []), ...(row.evaluation?.unknowns || [])].join("\n"))}"><span class="badge ${String(row.status).toLowerCase()}">${escapeHtml(row.status)}</span></td>
             <td>${compact(row.price, true)}</td>
             <td>${compact(row.marketCap, true)}</td>
             <td>${multiple(row.priceToNfcf)}</td>
-            <td>${multiple(row.priceToEconomicNfcf)}</td>
-            <td>${multiple(row.evToUnleveredNfcf)}</td>
+            <td class="optional-metric">${multiple(row.priceToEconomicNfcf)}</td>
+            <td class="optional-metric">${multiple(row.evToUnleveredNfcf)}</td>
             <td>${percent(row.fcfYield)}</td>
-            <td>${percent(row.economicFcfYield)}</td>
-            <td><span class="badge ${row.fcfTrajectory === 'Expanding' ? 'badge-green' : row.fcfTrajectory === 'Deteriorating' ? 'badge-amber' : ''}">${escapeHtml(row.fcfTrajectory || 'Stable')}</span></td>
-            <td><span class="badge ${row.buybackRating === 'Accretive' ? 'badge-green' : row.buybackRating === 'Value Destructive' ? 'badge-amber' : ''}">${escapeHtml(row.buybackRating || 'N/A')}</span></td>
-            <td>${row.capexToDnaRatio ? `${(row.capexToDnaRatio * 100).toFixed(0)}%` : "—"}</td>
+            <td class="optional-metric">${percent(row.economicFcfYield)}</td>
+            <td class="optional-metric"><span class="badge ${row.fcfTrajectory === 'Expanding' ? 'badge-green' : row.fcfTrajectory === 'Deteriorating' ? 'badge-amber' : ''}">${escapeHtml(row.fcfTrajectory || 'Stable')}</span></td>
+            <td class="optional-metric"><span class="badge ${row.buybackRating === 'Accretive' ? 'badge-green' : row.buybackRating === 'Value Destructive' ? 'badge-amber' : ''}">${escapeHtml(row.buybackRating || 'N/A')}</span></td>
+            <td class="optional-metric">${row.capexToDnaRatio ? `${(row.capexToDnaRatio * 100).toFixed(0)}%` : "—"}</td>
             <td>${escapeHtml(row.usableYears)} yrs</td>
-            <td>${multiple(row.netDebtToNfcf)}</td>
-            <td>${percent(row.latestSbcToFcf)}</td>
+            <td class="optional-metric">${multiple(row.netDebtToNfcf)}</td>
+            <td class="optional-metric">${percent(row.latestSbcToFcf)}</td>
           </tr>`).join("")}
         </tbody>
       </table>
@@ -281,6 +310,14 @@ function attachTableEvents(container, results) {
   });
 
   container.querySelector(".export")?.addEventListener("click", () => exportCsv(applyFilterAndSort(results)));
+  container.querySelector("[data-more-metrics]")?.addEventListener("click", (event) => {
+    state.showMoreMetrics = !state.showMoreMetrics;
+    document.querySelectorAll(".results-shell").forEach((shell) => shell.classList.toggle("show-more", state.showMoreMetrics));
+    document.querySelectorAll("[data-more-metrics]").forEach((button) => {
+      button.textContent = state.showMoreMetrics ? "Fewer metrics" : "More metrics";
+      button.setAttribute("aria-expanded", String(state.showMoreMetrics));
+    });
+  });
 }
 
 function applyFilterAndSort(results) {
@@ -403,7 +440,7 @@ function renderWaterfall(latestRow, normalized) {
   const sbcPct = Math.min(100, Math.max(2, Math.round((sbc / ocf) * 100)));
   const econPct = Math.max(2, Math.round((econFcf / ocf) * 100));
 
-  return `<div class="report-card">
+  return `<div class="report-card report-detail">
     <div class="waterfall-header">
       <div>
         <h3>Visual FCF Waterfall Bridge</h3>
@@ -462,7 +499,7 @@ function renderReverseDcf(report) {
   const impliedGrowthRate = (low + high) / 2;
   const impliedGrowth = Math.round(impliedGrowthRate * 1000) / 10;
 
-  return `<div class="report-card">
+  return `<div class="report-card report-detail">
     <div class="reverse-dcf-head">
       <div>
         <h3>Reverse DCF & Expectations Investing</h3>
@@ -495,6 +532,36 @@ function renderReverseDcf(report) {
   </div>`;
 }
 
+function renderConcernGroups(report, evaluation) {
+  const groups = { valuation: [], quality: [], missing: [] };
+  const add = (group, message) => {
+    if (message && !groups[group].includes(message)) groups[group].push(message);
+  };
+  const classify = (message) => {
+    const text = String(message || "");
+    if (/missing|unavailable|unknown|incomplete|no .*data|could not/i.test(text)) return "missing";
+    if (/price|market cap|valuation|multiple|enterprise value|net debt|shares|p\/|ev\/|yield/i.test(text)) return "valuation";
+    return "quality";
+  };
+
+  report.warnings.forEach((message) => add(classify(message), message));
+  evaluation.failures.forEach((message) => add(classify(message), `Failed screen: ${message}`));
+  evaluation.exclusions.forEach((message) => add("quality", `Excluded: ${message}`));
+  evaluation.unknowns.forEach((message) => add("missing", `Unknown: ${message}`));
+
+  const cards = [
+    ["valuation", "Valuation concerns", "What could distort the price or multiple", "high"],
+    ["quality", "Quality concerns", "Operating, capital-allocation, or eligibility flags", "medium"],
+    ["missing", "Missing data", "Evidence that should be verified before relying on the result", "info"]
+  ].filter(([key]) => groups[key].length);
+
+  if (!cards.length) return `<div class="concern-clear"><span>✓</span><div><strong>No screening concerns detected</strong><small>All required evidence is available under the active criteria.</small></div></div>`;
+  return `<div class="concern-grid">${cards.map(([key, title, subtitle, severity]) => `<section class="concern-card ${severity}">
+    <div class="concern-head"><span class="concern-dot"></span><div><strong>${title}</strong><small>${subtitle}</small></div><b>${groups[key].length}</b></div>
+    <ul>${groups[key].map((message) => `<li>${escapeHtml(message)}</li>`).join("")}</ul>
+  </section>`).join("")}</div>`;
+}
+
 function renderReport(report) {
   const evaluation = screening.evaluateCandidate(report, state.criteria);
   const lookback = screening.lookbackKey(state.criteria);
@@ -506,7 +573,7 @@ function renderReport(report) {
   const yahooUrl = `https://finance.yahoo.com/quote/${encodeURIComponent(report.ticker)}`;
   const latestRow = report.rows.find((row) => typeof row.fcf === "number" && typeof row.revenue === "number") || {};
 
-  return `<div class="report-card">
+  return `<div class="report-card report-summary">
     <div class="report-title">
       <div>
         <p class="kicker">${escapeHtml(evaluation.status)} • ${lookback === "all" ? "Full-history" : `${lookback}-year`} screen</p>
@@ -523,18 +590,17 @@ function renderReport(report) {
         <span class="badge ${String(evaluation.status).toLowerCase()}">${escapeHtml(evaluation.status)}</span>
       </div>
     </div>
-    ${report.warnings.length ? `<div class="warnings"><strong>Check before relying on this result</strong><ul>${report.warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul></div>` : ""}
-    <div class="warnings"><strong>Evidence confidence: ${escapeHtml(report.evidenceConfidence?.level || "Unknown")}</strong>
-      <ul>
-        ${evaluation.failures.map((item) => `<li>Failed: ${escapeHtml(item)}</li>`).join("")}
-        ${evaluation.exclusions.map((item) => `<li>Excluded: ${escapeHtml(item)}</li>`).join("")}
-        ${evaluation.unknowns.map((item) => `<li>Unknown: ${escapeHtml(item)}</li>`).join("")}
-        ${!evaluation.failures.length && !evaluation.exclusions.length && !evaluation.unknowns.length ? "<li>All required screening evidence is available.</li>" : ""}
-      </ul>
+    <div class="decision-strip">
+      <div><span>Decision</span><strong class="decision-${String(evaluation.status).toLowerCase()}">${escapeHtml(evaluation.status)}</strong></div>
+      <div><span>Selected P/nFCF</span><strong>${multiple(v.priceToNfcf)}</strong></div>
+      <div><span>FCF yield</span><strong>${percent(v.fcfYield)}</strong></div>
+      <div><span>Evidence confidence</span><strong>${escapeHtml(report.evidenceConfidence?.level || "Unknown")}</strong></div>
     </div>
+    ${renderConcernGroups(report, evaluation)}
   </div>
 
-  <div class="report-grid">
+  <div class="report-section-heading"><div><span>01</span><div><p class="kicker">Decision metrics</p><h3>Valuation and cash-flow quality</h3></div></div><small>Click any metric to inspect its calculation</small></div>
+  <div class="report-grid core-metrics">
     <div class="metric clickable" data-metric="price"><span>Price</span><strong>${compact(v.price, true)}</strong><span class="metric-hint">How it was calculated</span></div>
     <div class="metric clickable" data-metric="marketCap"><span>Market capitalization</span><strong>${compact(v.marketCap, true)}</strong><span class="metric-hint">How it was calculated</span></div>
     <div class="metric clickable" data-metric="normalizedFcf"><span>Normalized FCF</span><strong>${compact(n.normalizedFcf, true)}</strong><span class="metric-hint">How it was calculated</span></div>
@@ -553,10 +619,12 @@ function renderReport(report) {
     <div class="metric clickable" data-metric="usableYears"><span>Usable history</span><strong>${n.usableYears} years</strong><span class="metric-hint">How it was calculated</span></div>
   </div>
 
+  <div class="report-section-heading detail-heading"><div><span>02</span><div><p class="kicker">Supporting analysis</p><h3>Evidence and expectations</h3></div></div><small>Detailed audit trail</small></div>
+
   ${renderWaterfall(latestRow, n)}
   ${renderReverseDcf(report)}
 
-  <div class="report-card">
+  <div class="report-card report-detail">
     <h3>Normalized Margin Architecture (50/50 Equal Weighting)</h3>
     <div class="formulas">
       <div class="formula"><span>Simple average margin</span><strong>${percent(n.simpleAverageMargin)}</strong><small>Arithmetic mean of ${n.usableYears} annual margins</small></div>
@@ -565,7 +633,7 @@ function renderReport(report) {
     </div>
   </div>
 
-  <div class="report-card">
+  <div class="report-card report-detail">
     <h3>Annual Filing Evidence</h3>
     ${rowTable(report.rows)}
     <div class="filing-links">
@@ -575,7 +643,7 @@ function renderReport(report) {
     </div>
   </div>
 
-  <div class="report-card">
+  <div class="report-card report-detail">
     <div class="waterfall-header">
       <div>
         <h3>Lookback Range Comparison (10Y vs. 5Y vs. 3Y)</h3>
@@ -606,7 +674,7 @@ function renderReport(report) {
     </div>
   </div>
 
-  <div class="report-card">
+  <div class="report-card report-detail methodology-card">
     <h3>Sources and Methodology</h3>
     <p>Financials: <strong>${escapeHtml(report.sources.financials || "Unavailable")}</strong>. Price: <strong>${escapeHtml(report.sources.price || "Unavailable")}</strong>. Analyzed ${escapeHtml(new Date(report.analyzedAt).toLocaleString())}.</p>
     <p>Debt: <strong>${escapeHtml(report.sources.debt || "Unavailable")}</strong>. Cash: <strong>${escapeHtml(report.sources.cash || "Unavailable")}</strong>. Hover an annual period to inspect the exact XBRL concepts used for that year.</p>
@@ -675,7 +743,13 @@ $("#screen-form").addEventListener("submit", async (event) => {
 });
 
 function saveAuto() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.auto)); } catch {}
+  try {
+    if (state.auto) {
+      state.auto.criteria = { ...state.criteria };
+      state.auto.activePreset = state.activePreset;
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.auto));
+  } catch {}
 }
 
 function updateAutoUi() {
@@ -683,16 +757,37 @@ function updateAutoUi() {
   if (!scan) return;
   const max = Math.min(scan.maxExamine, scan.symbols.length);
   const examined = Math.min(scan.cursor, max);
+  const percentComplete = max ? Math.round((examined / max) * 100) : 0;
+  const completedThisRun = Math.max(0, examined - Number(scan.runStartCursor || 0));
+  const elapsedSeconds = scan.runStartedAt ? (Date.now() - scan.runStartedAt) / 1000 : 0;
+  const secondsPerTicker = completedThisRun > 0 ? elapsedSeconds / completedThisRun : NaN;
+  const eta = scan.complete ? "Complete" : state.stopped ? "Paused" : formatDuration((max - examined) * secondsPerTicker);
   $("#progress-wrap").classList.remove("hidden");
-  $("#progress-bar").style.width = `${max ? (examined / max) * 100 : 0}%`;
-  $("#progress-text").textContent = `${examined}/${max} examined • ${scan.results.length} ideas found`;
-  renderTable($("#idea-results"), scan.results, "Current ideas");
+  $("#progress-bar").style.width = `${percentComplete}%`;
+  $("#progress-text").textContent = `${examined}/${max} examined • ${scan.results.length} ${scan.results.length === 1 ? "idea" : "ideas"} found`;
+  $("#scan-percent").textContent = `${percentComplete}%`;
+  $("#scan-examined").textContent = `${examined} / ${max}`;
+  $("#scan-batch").textContent = examined ? `${Math.ceil(examined / 8)} / ${Math.ceil(max / 8)}` : `— / ${Math.ceil(max / 8)}`;
+  $("#scan-ideas").textContent = String(scan.results.length);
+  $("#scan-failures").textContent = String(scan.failures.length);
+  $("#scan-eta").textContent = eta;
+  $("#scan-state").textContent = scan.complete ? "Scan complete" : state.stopped ? "Scan paused" : "Analyzing companies";
+  const health = $("#scan-health");
+  health.textContent = scan.rateLimited ? "Rate limit pause" : "Pacing active";
+  health.classList.toggle("health-warning", Boolean(scan.rateLimited));
+  health.classList.toggle("health-good", !scan.rateLimited);
+  if (examined > 0) renderTable($("#idea-results"), scan.results, "Current ideas");
 }
 
 async function runAuto() {
   const scan = state.auto;
   state.stopped = false;
+  scan.runStartedAt = Date.now();
+  scan.runStartCursor = scan.cursor;
+  scan.rateLimited = false;
   $("#progress-wrap").classList.add("is-running");
+  $("#scan-pause-button")?.classList.remove("hidden");
+  if ($("#scan-pause-button")) $("#scan-pause-button").disabled = false;
   $("#find-button").disabled = true;
   $("#stop-button").disabled = false;
   const max = Math.min(scan.maxExamine, scan.symbols.length);
@@ -703,9 +798,9 @@ async function runAuto() {
 
     while (scan.cursor < max && !state.stopped) {
       const batchRows = scan.symbols.slice(scan.cursor, scan.cursor + 8);
-      scan.cursor += batchRows.length;
       const unreviewedRows = batchRows.filter((item) => !reviewed.has(item.ticker));
       if (!unreviewedRows.length) {
+        scan.cursor += batchRows.length;
         updateAutoUi();
         continue;
       }
@@ -719,6 +814,7 @@ async function runAuto() {
           criteria: state.criteria
         })
       });
+      scan.cursor += batchRows.length;
       Object.assign(state.reports, data.reports);
 
       // Store in allExamined
@@ -738,21 +834,28 @@ async function runAuto() {
 
       const hasRateLimit = data.failures?.some((f) => String(f.error || "").includes("429"));
       if (hasRateLimit) {
+        scan.rateLimited = true;
+        updateAutoUi();
         setStatus("SEC rate limit reached. Pausing 2.5s...", true);
         await new Promise((r) => setTimeout(r, 2500));
       } else {
+        scan.rateLimited = false;
         setStatus(`Auto Finder: examined ${scan.cursor} and found ${scan.results.length} ideas.`);
         await new Promise((r) => setTimeout(r, 400));
       }
     }
     scan.complete = scan.cursor >= max;
     saveAuto();
+    updateAutoUi();
     const reason = state.stopped ? "stopped" : "universe completed";
     setStatus(`Auto Finder ${reason}: ${scan.results.length} ideas from ${scan.cursor} companies.`);
   } catch (error) {
+    state.stopped = true;
+    updateAutoUi();
     setStatus(`Scan paused: ${error.message}. Press Resume to continue.`, true);
   } finally {
     $("#progress-wrap").classList.remove("is-running");
+    $("#scan-pause-button")?.classList.add("hidden");
     $("#find-button").disabled = false;
     $("#stop-button").disabled = true;
     $("#find-button").textContent = scan.complete ? "Start new scan" : "Resume scan";
@@ -791,15 +894,35 @@ $("#stop-button").addEventListener("click", () => {
   state.stopped = true;
   $("#stop-button").disabled = true;
 });
+$("#scan-pause-button")?.addEventListener("click", () => {
+  state.stopped = true;
+  $("#scan-state").textContent = "Pausing after current batch…";
+  $("#scan-pause-button").disabled = true;
+});
 
 // Restore previous scan state if exists
 try {
   const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
   if (saved?.symbols && Array.isArray(saved.results)) {
     state.auto = saved;
-    $("#target").value = String(saved.target);
+    state.stopped = !saved.complete;
+    state.auto.runStartedAt = null;
+    if (saved.criteria) {
+      state.criteria = {
+        ...PRESETS.default,
+        ...saved.criteria,
+        maxMarketCap: saved.criteria.maxMarketCap == null ? Infinity : saved.criteria.maxMarketCap
+      };
+      state.activePreset = saved.activePreset || "custom";
+      syncCriteriaControls(state.criteria, state.activePreset);
+    }
+    if (Array.isArray(state.auto.allExamined)) {
+      state.auto.results = state.auto.allExamined.filter((row) => evaluateReportStatus(row, state.criteria) === "Idea");
+    }
+    if ($("#target")) $("#target").value = String(saved.target);
     $("#max-examine").value = String(saved.maxExamine);
     $("#find-button").textContent = saved.complete ? "Start new scan" : "Resume scan";
+    saveAuto();
     updateAutoUi();
     setStatus(saved.complete ? `Previous scan found ${saved.results.length} ideas.` : `Saved scan can resume at ${saved.cursor} examined.`);
   }
@@ -1186,33 +1309,37 @@ window.addEventListener("keydown", (e) => {
 
 
 // Global Criteria Controllers & Real-Time Listeners
+function syncCriteriaControls(criteria, presetKey = "custom") {
+  document.querySelectorAll(".preset-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.preset === presetKey);
+  });
+  if ($("#tol-multiple")) { $("#tol-multiple").value = criteria.maxMultiple; $("#tol-multiple-val").textContent = `${criteria.maxMultiple}x`; }
+  if ($("#tol-ev-multiple")) {
+    const evVal = Number.isFinite(criteria.maxEvMultiple) ? criteria.maxEvMultiple : 100;
+    $("#tol-ev-multiple").value = Math.min(100, evVal);
+    $("#tol-ev-multiple-val").textContent = evVal >= 100 ? "Any (100x+)" : `${evVal}x`;
+  }
+  const minMcIndex = Math.max(0, MC_LEVELS.indexOf(criteria.minMarketCap));
+  const maxMcIndex = criteria.maxMarketCap === Infinity ? 8 : Math.max(0, MAX_MC_LEVELS.indexOf(criteria.maxMarketCap));
+  if ($("#tol-min-mc-slider")) { $("#tol-min-mc-slider").value = minMcIndex; $("#tol-min-mc-val").textContent = MC_LEVEL_LABELS[minMcIndex]; }
+  if ($("#tol-max-mc-slider")) { $("#tol-max-mc-slider").value = maxMcIndex; $("#tol-max-mc-val").textContent = MAX_MC_LEVEL_LABELS[maxMcIndex]; }
+  if ($("#tol-years")) { $("#tol-years").value = criteria.minYears; $("#tol-years-val").textContent = `${criteria.minYears} yrs`; }
+  if ($("#tol-debt")) { $("#tol-debt").value = criteria.maxDebt; $("#tol-debt-val").textContent = `${Number(criteria.maxDebt).toFixed(1)}x`; }
+  if ($("#tol-sbc")) { $("#tol-sbc").value = Math.round(criteria.maxSbc * 100); $("#tol-sbc-val").textContent = `${Math.round(criteria.maxSbc * 100)}%`; }
+  if ($("#tol-dilution")) { $("#tol-dilution").value = Math.round(criteria.maxDilution * 100); $("#tol-dilution-val").textContent = `${Math.round(criteria.maxDilution * 100)}%`; }
+  if ($("#tol-posfcf")) { $("#tol-posfcf").value = Math.round(criteria.minPosFcf * 100); $("#tol-posfcf-val").textContent = `${Math.round(criteria.minPosFcf * 100)}%`; }
+  if ($("#tol-solvency")) $("#tol-solvency").checked = criteria.enforceSolvency;
+  if ($("#tol-financials")) $("#tol-financials").checked = criteria.excludeFinancials;
+  if ($("#lookback-select")) $("#lookback-select").value = criteria.lookbackYears || "all";
+}
+
 function applyPreset(presetKey) {
   const preset = PRESETS[presetKey];
   if (!preset) return;
   state.activePreset = presetKey;
   state.criteria = { ...preset };
 
-  document.querySelectorAll(".preset-btn").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.preset === presetKey);
-  });
-
-  if ($("#tol-multiple")) { $("#tol-multiple").value = preset.maxMultiple; $("#tol-multiple-val").textContent = `${preset.maxMultiple}x`; }
-  if ($("#tol-ev-multiple")) {
-    const evVal = Number.isFinite(preset.maxEvMultiple) ? preset.maxEvMultiple : 100;
-    $("#tol-ev-multiple").value = Math.min(100, evVal);
-    $("#tol-ev-multiple-val").textContent = evVal >= 100 ? "Any (100x+)" : `${evVal}x`;
-  }
-  if ($("#tol-min-mc-slider")) { $("#tol-min-mc-slider").value = 0; $("#tol-min-mc-val").textContent = "$0 (All)"; }
-  if ($("#tol-max-mc-slider")) { $("#tol-max-mc-slider").value = 8; $("#tol-max-mc-val").textContent = "Any ($5T+)"; }
-  if ($("#tol-years")) { $("#tol-years").value = preset.minYears; $("#tol-years-val").textContent = `${preset.minYears} yrs`; }
-  if ($("#tol-debt")) { $("#tol-debt").value = preset.maxDebt; $("#tol-debt-val").textContent = `${Number(preset.maxDebt).toFixed(1)}x`; }
-  if ($("#tol-sbc")) { $("#tol-sbc").value = Math.round(preset.maxSbc * 100); $("#tol-sbc-val").textContent = `${Math.round(preset.maxSbc * 100)}%`; }
-  if ($("#tol-dilution")) { $("#tol-dilution").value = Math.round(preset.maxDilution * 100); $("#tol-dilution-val").textContent = `${Math.round(preset.maxDilution * 100)}%`; }
-  if ($("#tol-posfcf")) { $("#tol-posfcf").value = Math.round(preset.minPosFcf * 100); $("#tol-posfcf-val").textContent = `${Math.round(preset.minPosFcf * 100)}%`; }
-  if ($("#tol-solvency")) { $("#tol-solvency").checked = preset.enforceSolvency; }
-  if ($("#tol-financials")) { $("#tol-financials").checked = preset.excludeFinancials; }
-  if ($("#lookback-select")) $("#lookback-select").value = preset.lookbackYears || "all";
-
+  syncCriteriaControls(preset, presetKey);
   reEvaluateAll();
 }
 
@@ -1302,12 +1429,17 @@ function resetSearch() {
   state.auto = null;
   try { localStorage.removeItem(STORAGE_KEY); } catch {}
   const container = $("#idea-results");
-  if (container) container.innerHTML = "";
+  if (container) {
+    container.innerHTML = initialIdeaEmptyHtml();
+    delete container._rawResults;
+    delete container._rawTitle;
+  }
   $("#progress-wrap")?.classList.remove("is-running");
   $("#progress-wrap")?.classList.add("hidden");
   $("#find-button").disabled = false;
   $("#stop-button").disabled = true;
   $("#find-button").textContent = "Find stocks";
+  $("#scan-pause-button").disabled = false;
   setStatus("Search reset. Select universe and criteria, then click Find stocks to scan.");
 }
 $("#reset-search-btn")?.addEventListener("click", resetSearch);

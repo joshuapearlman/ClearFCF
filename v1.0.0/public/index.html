@@ -26,9 +26,9 @@
       <span class="cmd-hint" title="Press Cmd+K or Ctrl+K to jump to a stock"><kbd>⌘K</kbd></span>
     </div>
     <nav aria-label="Primary">
-      <button class="nav-button active" data-view="ideas">Idea Finder</button>
-      <button class="nav-button" data-view="screen">Paste Tickers</button>
-      <button class="nav-button" data-view="analyze">Analyze Stock</button>
+      <button class="nav-button active" data-view="ideas"><span class="nav-icon" aria-hidden="true">⌕</span><span class="nav-label-full">Idea Finder</span><span class="nav-label-short">Ideas</span></button>
+      <button class="nav-button" data-view="screen"><span class="nav-icon" aria-hidden="true">≡</span><span class="nav-label-full">Paste Tickers</span><span class="nav-label-short">Watchlist</span></button>
+      <button class="nav-button" data-view="analyze"><span class="nav-icon" aria-hidden="true">↗</span><span class="nav-label-full">Analyze Stock</span><span class="nav-label-short">Analyze</span></button>
     </nav>
   </header>
 
@@ -69,9 +69,11 @@
               <option value="3">3 Years</option>
             </select>
           </label>
-          <button id="find-button" class="primary">Find stocks</button>
-          <button id="stop-button" class="secondary" disabled>Stop</button>
-          <button id="reset-search-btn" class="secondary" type="button" title="Clear search results and reset">Reset search</button>
+          <div class="finder-actions">
+            <button id="find-button" class="primary">Find stocks</button>
+            <button id="stop-button" class="secondary hidden" disabled>Pause scan</button>
+            <button id="reset-search-btn" class="utility-button" type="button" title="Clear search results and reset">Reset</button>
+          </div>
         </div>
       </div>
 
@@ -152,12 +154,40 @@
         </div>
       </div>
 
-      <div id="progress-wrap" class="progress-wrap hidden">
+      <div id="progress-wrap" class="scan-dashboard hidden" aria-live="polite">
+        <div class="scan-dashboard-head">
+          <div>
+            <span class="scan-eyebrow">Market scan</span>
+            <strong id="scan-state">Ready to scan</strong>
+          </div>
+          <span id="scan-percent" class="scan-percent">0%</span>
+        </div>
         <div class="progress-track"><div id="progress-bar"></div></div>
-        <span id="progress-text"></span>
+        <div class="scan-stats">
+          <div><span>Examined</span><strong id="scan-examined">0 / 0</strong></div>
+          <div><span>Current batch</span><strong id="scan-batch">—</strong></div>
+          <div><span>Ideas found</span><strong id="scan-ideas">0</strong></div>
+          <div><span>Failures</span><strong id="scan-failures">0</strong></div>
+          <div><span>Time remaining</span><strong id="scan-eta">Calculating…</strong></div>
+          <div><span>Request health</span><strong id="scan-health" class="health-good">Pacing active</strong></div>
+        </div>
+        <div class="scan-dashboard-foot">
+          <span id="progress-text">Waiting to begin.</span>
+          <button id="scan-pause-button" class="scan-pause hidden" type="button">Pause scan</button>
+        </div>
       </div>
 
-      <div id="idea-results"></div>
+      <div id="idea-results">
+        <div class="empty-state">
+          <div class="empty-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+          <p class="kicker">Your research queue starts here</p>
+          <h3>Find durable cash flow at a sensible price</h3>
+          <p>Choose a universe and start a scan. ClearFCF will evaluate each company, preserve the evidence, and surface only the candidates that pass your criteria.</p>
+          <div class="example-result" aria-label="Example result">
+            <span class="ticker">EXAMPLE</span><span class="badge idea">Idea</span><span><small>P/nFCF</small> 11.8x</span><span><small>FCF yield</small> 8.5%</span>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- VIEW 2: WATCHLIST -->
@@ -171,7 +201,13 @@
           <button class="primary" type="submit">Screen tickers</button>
         </form>
       </div>
-      <div id="screen-results"></div>
+      <div id="screen-results">
+        <div class="empty-state compact-empty">
+          <div class="empty-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+          <h3>Paste a watchlist to compare candidates</h3>
+          <p>Results will be ranked by screening status and normalized FCF valuation.</p>
+        </div>
+      </div>
     </section>
 
     <!-- VIEW 3: SINGLE STOCK ANALYZE -->
