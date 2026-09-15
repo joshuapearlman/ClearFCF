@@ -91,7 +91,7 @@
     else pass.push("Market capitalization is within range");
 
     const usableYears = get("usableYears", "normalized", "usableYears");
-    const minYears = threshold(criteria.minYears, 6);
+    const minYears = threshold(criteria.minYears, 5);
     if (!finite(usableYears) || usableYears < minYears) excluded.push(`Fewer than ${minYears} usable annual periods`);
     else pass.push(`${usableYears} usable annual periods`);
 

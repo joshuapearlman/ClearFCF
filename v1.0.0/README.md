@@ -53,4 +53,5 @@ The `.github/workflows/mac-release.yml` workflow runs on `v*` tags, builds the M
 - Evidence-confidence gating with explicit pass, fail, exclusion, and unknown reasons
 - Per-year XBRL provenance (hover an annual period in a company report)
 - Working 3-year, 5-year, and full-history screening lookbacks
+- Automatic Yahoo fundamentals fallback when SEC blocks a hosted request (clearly labeled as partial-confidence evidence)
 - CSV export and local storage persistence

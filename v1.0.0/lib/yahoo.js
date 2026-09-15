@@ -47,11 +47,12 @@ async function fetchYahooQuote(ticker) {
       const auth = await getYahooAuth(attempt > 0);
       const authHeaders = auth?.cookie ? { ...HEADERS, cookie: auth.cookie } : HEADERS;
       const crumbStr = auth?.crumb ? `&crumb=${encodeURIComponent(auth.crumb)}` : "";
-      const summaryUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=price,defaultKeyStatistics,financialData${crumbStr}`;
+      const summaryUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=price,defaultKeyStatistics,financialData,assetProfile${crumbStr}`;
       const summaryData = await fetchJson(summaryUrl, { headers: authHeaders }, 8000);
       const pMod = summaryData?.quoteSummary?.result?.[0]?.price;
       const sMod = summaryData?.quoteSummary?.result?.[0]?.defaultKeyStatistics;
       const fMod = summaryData?.quoteSummary?.result?.[0]?.financialData;
+      const profile = summaryData?.quoteSummary?.result?.[0]?.assetProfile;
 
       const priceVal = pMod?.regularMarketPrice?.raw ?? pMod?.regularMarketPrice;
       const mcVal = pMod?.marketCap?.raw ?? pMod?.marketCap;
@@ -77,6 +78,9 @@ async function fetchYahooQuote(ticker) {
           currency: pMod?.currency || null,
           exchange: pMod?.exchangeName || null,
           instrumentType: pMod?.quoteType || null,
+          companyName: pMod?.longName || pMod?.shortName || ticker,
+          sector: profile?.sector || null,
+          industry: profile?.industry || null,
           marketTime: pMod?.regularMarketTime ? new Date(pMod.regularMarketTime * 1000).toISOString() : null,
           source: "Yahoo Finance live balance sheet & quote"
         };
@@ -112,6 +116,9 @@ async function fetchYahooQuote(ticker) {
           currency: q.currency || null,
           exchange: q.fullExchangeName || q.exchange || null,
           instrumentType: q.quoteType || null,
+          companyName: q.longName || q.shortName || ticker,
+          sector: q.sector || null,
+          industry: q.industry || null,
           marketTime: q.regularMarketTime ? new Date(q.regularMarketTime * 1000).toISOString() : null,
           source: "Yahoo Finance quote"
         };
@@ -138,8 +145,121 @@ async function fetchYahooQuote(ticker) {
     currency: meta.currency || null,
     exchange: meta.exchangeName || meta.fullExchangeName || null,
     instrumentType: meta.instrumentType || null,
+    companyName: meta.longName || meta.shortName || ticker,
+    sector: null,
+    industry: null,
     marketTime: meta.regularMarketTime ? new Date(meta.regularMarketTime * 1000).toISOString() : null,
     source: "Yahoo Finance chart"
+  };
+}
+
+const FUNDAMENTAL_TYPES = [
+  "annualTotalRevenue",
+  "annualOperatingCashFlow",
+  "annualCapitalExpenditure",
+  "annualStockBasedCompensation",
+  "annualDilutedAverageShares",
+  "annualDepreciationAndAmortization",
+  "annualInterestExpense",
+  "annualRepurchaseOfCapitalStock",
+  "quarterlyCashCashEquivalentsAndShortTermInvestments",
+  "quarterlyCashAndCashEquivalents",
+  "quarterlyTotalDebt",
+  "quarterlyCurrentDebt"
+];
+
+async function fetchFundamentalWindow(ticker, period1, period2) {
+  const symbol = encodeURIComponent(ticker);
+  const types = FUNDAMENTAL_TYPES.join(",");
+  const url = `https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${symbol}?symbol=${symbol}&type=${types}&period1=${period1}&period2=${period2}`;
+  const data = await fetchJson(url, { headers: HEADERS }, 12000);
+  return data?.timeseries?.result || [];
+}
+
+function yahooFact(item, tag) {
+  const value = item?.reportedValue?.raw;
+  if (!finite(value) || !item?.asOfDate) return null;
+  return {
+    val: value,
+    end: item.asOfDate,
+    filed: item.asOfDate,
+    form: "Yahoo",
+    taxonomy: "yahoo-finance",
+    tag,
+    label: tag.replace(/^(annual|quarterly)/, ""),
+    unit: tag.includes("Shares") ? "shares" : item.currencyCode || "USD"
+  };
+}
+
+function yahooSeries(byType, tag) {
+  const values = new Map();
+  for (const item of byType.get(tag) || []) {
+    const fact = yahooFact(item, tag);
+    if (fact) values.set(Number(fact.end.slice(0, 4)), fact);
+  }
+  const first = values.values().next().value;
+  return { values, taxonomy: "yahoo-finance", tag, label: first?.label || tag, unit: first?.unit || "USD" };
+}
+
+function latestYahooFact(byType, tags) {
+  return tags.flatMap((tag) => (byType.get(tag) || []).map((item) => yahooFact(item, tag)).filter(Boolean))
+    .sort((a, b) => String(b.end).localeCompare(String(a.end)))[0] || null;
+}
+
+async function fetchYahooFinancials(ticker) {
+  const nowSeconds = Math.floor(Date.now() / 1000) + 86400;
+  const initial = await fetchFundamentalWindow(ticker, 946684800, nowSeconds);
+  const annualDates = initial.flatMap((series) => {
+    const tag = series?.meta?.type?.[0];
+    return tag === "annualTotalRevenue" ? (series[tag] || []).map((item) => item.asOfDate).filter(Boolean) : [];
+  });
+  if (!annualDates.length) {
+    const error = new Error(`${ticker} has no Yahoo annual financial history.`);
+    error.statusCode = 404;
+    throw error;
+  }
+  const earliestYear = Math.min(...annualDates.map((date) => Number(date.slice(0, 4))));
+  const cutoff = (year) => Math.floor(Date.parse(`${year}-01-01T00:00:00Z`) / 1000);
+  const older = await Promise.all([
+    fetchFundamentalWindow(ticker, 946684800, cutoff(earliestYear)),
+    fetchFundamentalWindow(ticker, 946684800, cutoff(earliestYear - 1))
+  ]);
+  const byType = new Map();
+  for (const series of [...initial, ...older.flat()]) {
+    const tag = series?.meta?.type?.[0];
+    if (!tag) continue;
+    const existing = byType.get(tag) || [];
+    const seen = new Set(existing.map((item) => item.asOfDate));
+    for (const item of series[tag] || []) {
+      if (item?.asOfDate && !seen.has(item.asOfDate)) {
+        existing.push(item);
+        seen.add(item.asOfDate);
+      }
+    }
+    byType.set(tag, existing);
+  }
+
+  const empty = (tag) => ({ values: new Map(), taxonomy: "yahoo-finance", tag, label: tag, unit: "USD" });
+  const series = {
+    revenue: yahooSeries(byType, "annualTotalRevenue"),
+    ocf: yahooSeries(byType, "annualOperatingCashFlow"),
+    capex: yahooSeries(byType, "annualCapitalExpenditure"),
+    intangibleCapex: empty("Unavailable"),
+    dna: yahooSeries(byType, "annualDepreciationAndAmortization"),
+    interestExpense: yahooSeries(byType, "annualInterestExpense"),
+    sbc: yahooSeries(byType, "annualStockBasedCompensation"),
+    dilutedShares: yahooSeries(byType, "annualDilutedAverageShares"),
+    buybackCash: yahooSeries(byType, "annualRepurchaseOfCapitalStock"),
+    buybackShares: empty("Unavailable")
+  };
+  const cash = latestYahooFact(byType, ["quarterlyCashCashEquivalentsAndShortTermInvestments", "quarterlyCashAndCashEquivalents"]);
+  const totalDebt = latestYahooFact(byType, ["quarterlyTotalDebt"]);
+  const shortDebt = latestYahooFact(byType, ["quarterlyCurrentDebt"]);
+  const currencies = [...series.revenue.values.values()].map((fact) => fact.unit).filter(Boolean);
+  return {
+    series,
+    latest: { cash, totalDebt, shortDebt, longDebt: null, sharesOutstanding: null },
+    financialCurrency: currencies[0] || "USD"
   };
 }
 
@@ -216,4 +336,4 @@ async function fetchExchangeRate(from, to) {
   throw error;
 }
 
-module.exports = { SOURCES, fetchYahooQuote, fetchYahooUniverse, fetchExchangeRate };
+module.exports = { SOURCES, fetchYahooQuote, fetchYahooFinancials, fetchYahooUniverse, fetchExchangeRate };

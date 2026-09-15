@@ -14,7 +14,7 @@ const PRESETS = {
     name: "Default",
     maxMultiple: 15,
     maxEvMultiple: 20,
-    minYears: 6,
+    minYears: 5,
     maxDebt: 4.0,
     maxSbc: 0.30,
     maxDilution: 0.25,
@@ -599,7 +599,7 @@ function renderReport(report) {
 
   <div class="report-card">
     <h3>Sources and Methodology</h3>
-    <p>Financials: <strong>SEC Company Facts</strong>. Price: <strong>${escapeHtml(report.sources.price || "Unavailable")}</strong>. Analyzed ${escapeHtml(new Date(report.analyzedAt).toLocaleString())}.</p>
+    <p>Financials: <strong>${escapeHtml(report.sources.financials || "Unavailable")}</strong>. Price: <strong>${escapeHtml(report.sources.price || "Unavailable")}</strong>. Analyzed ${escapeHtml(new Date(report.analyzedAt).toLocaleString())}.</p>
     <p>Debt: <strong>${escapeHtml(report.sources.debt || "Unavailable")}</strong>. Cash: <strong>${escapeHtml(report.sources.cash || "Unavailable")}</strong>. Hover an annual period to inspect the exact XBRL concepts used for that year.</p>
   </div>`;
 }

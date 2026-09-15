@@ -1,7 +1,7 @@
 "use strict";
 
 const { fetchSecCompany, extractFinancials } = require("./sec");
-const { fetchYahooQuote, fetchExchangeRate } = require("./yahoo");
+const { fetchYahooQuote, fetchYahooFinancials, fetchExchangeRate } = require("./yahoo");
 const { finite, round, median, standardDeviation } = require("./utils");
 const { evaluateCandidate } = require("./screening");
 
@@ -351,17 +351,42 @@ async function analyzeTicker(rawTicker, options = {}) {
     error.statusCode = 400;
     throw error;
   }
-  const [{ company, facts, submissions }, quoteResult] = await Promise.all([
+  const [secAttempt, quoteAttempt] = await Promise.allSettled([
     fetchSecCompany(ticker),
-    fetchYahooQuote(ticker).catch((error) => ({ price: finite(Number(options.price)) ? Number(options.price) : null, error: error.message, source: "Unavailable" }))
+    fetchYahooQuote(ticker)
   ]);
-  const extracted = extractFinancials(facts);
+  const quoteResult = quoteAttempt.status === "fulfilled"
+    ? quoteAttempt.value
+    : { price: finite(Number(options.price)) ? Number(options.price) : null, error: quoteAttempt.reason?.message, source: "Unavailable" };
+  let company;
+  let submissions;
+  let extracted;
+  let financialSource = "SEC Company Facts";
+  let secFallbackReason = null;
+  if (secAttempt.status === "fulfilled") {
+    ({ company, submissions } = secAttempt.value);
+    extracted = extractFinancials(secAttempt.value.facts);
+  } else {
+    secFallbackReason = secAttempt.reason?.message || "SEC request failed";
+    extracted = await fetchYahooFinancials(ticker);
+    financialSource = "Yahoo Finance fundamentals fallback";
+    company = { cik: null, title: quoteResult.companyName || ticker };
+    submissions = {
+      name: quoteResult.companyName || ticker,
+      sic: null,
+      sicDescription: quoteResult.industry || quoteResult.sector || "Industry unavailable",
+      fiscalYearEnd: null,
+      exchanges: quoteResult.exchange ? [quoteResult.exchange] : [],
+      tickers: [ticker],
+      filings: { recent: {} }
+    };
+  }
   let rows = annualRows(extracted);
   let normalized = normalize(rows); // Full history (up to 10Y)
   let normalized5y = normalize(rows, 5); // 5-Year Lookback
   let normalized3y = normalize(rows, 3); // 3-Year Lookback
   const sic = Number(submissions.sic);
-  const isFinancial = finite(sic) && sic >= 6000 && sic <= 6799;
+  const isFinancial = (finite(sic) && sic >= 6000 && sic <= 6799) || /financial|bank|insurance/i.test(`${quoteResult.sector || ""} ${quoteResult.industry || ""}`);
   const hasUsdQuote = !quoteResult.currency || quoteResult.currency === "USD";
   const financialCurrency = extracted.financialCurrency || "USD";
   const quoteCurrency = quoteResult.currency || "USD";
@@ -467,9 +492,11 @@ async function analyzeTicker(rawTicker, options = {}) {
   };
 
   const warnings = [];
+  if (financialSource !== "SEC Company Facts") warnings.push(`SEC filing data was unavailable (${secFallbackReason}); analysis uses Yahoo annual fundamentals and should be verified against the original filing.`);
   if (isFinancial) warnings.push("Banking/insurance-style company: conventional FCF analysis is unsuitable.");
   if (!hasUsdQuote) warnings.push(`Price is quoted in ${quoteResult.currency}; version one only values USD-quoted securities.`);
-  if (normalized.usableYears < 6) warnings.push(`Only ${normalized.usableYears} usable annual periods; six are required.`);
+  const sourceMinimumYears = financialSource === "SEC Company Facts" ? 6 : 5;
+  if (normalized.usableYears < sourceMinimumYears) warnings.push(`Only ${normalized.usableYears} usable annual periods; ${sourceMinimumYears} are required for this data source.`);
   if (!finite(price)) warnings.push("Current price is unavailable.");
   if (!finite(effectiveShares)) warnings.push("Current share count is unavailable.");
   if (shareSelection.inconsistent && !suppliedMarketCap) warnings.push(`SEC instant shares (${round(shareSelection.instant)}) differ materially from annual diluted shares (${round(shareSelection.annual)}); valuation uses the annual diluted figure.`);
@@ -528,7 +555,7 @@ async function analyzeTicker(rawTicker, options = {}) {
   const filing = latestFiling(submissions);
   const criticalMissing = [debt, cash, effectiveShares, quality.latestSbcToFcf, normalized.normalizedEconomicFcf].some((item) => !finite(item)) || !currencyConversionValid;
   const evidenceConfidence = {
-    level: criticalMissing ? "Unsafe" : balanceSheet.reconciled ? "Reconciled" : normalized.usableYears < 6 ? "Partial" : "Complete",
+    level: criticalMissing ? "Unsafe" : financialSource !== "SEC Company Facts" || normalized.usableYears < 6 ? "Partial" : balanceSheet.reconciled ? "Reconciled" : "Complete",
     criticalMissing,
     balanceSheetReconciled: balanceSheet.reconciled,
     currencyConversionValid
@@ -557,7 +584,7 @@ async function analyzeTicker(rawTicker, options = {}) {
       unleveredFcf: "Normalized FCF + after-tax net interest expense for enterprise valuation"
     },
     sources: {
-      financials: "SEC Company Facts",
+      financials: financialSource,
       price: quoteResult.source,
       shares: shareSelection.source,
       marketCap: marketCapSource,
