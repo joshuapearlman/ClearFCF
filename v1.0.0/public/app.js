@@ -120,6 +120,9 @@ function setStatus(message, error = false) {
   if (!el) return;
   el.textContent = message;
   el.classList.toggle("error", error);
+  el.classList.remove("status-update");
+  void el.offsetWidth;
+  el.classList.add("status-update");
 }
 
 function parseTickers(input) {
