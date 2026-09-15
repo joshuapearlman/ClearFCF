@@ -36,6 +36,10 @@
 
   --shadow-float: 0 20px 48px rgba(20, 26, 20, 0.16);
 
+  --motion-fast: 120ms;
+  --motion-base: 220ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
   --serif: "Fraunces", "Iowan Old Style", Georgia, serif;
   --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -47,7 +51,11 @@ html { scroll-behavior: smooth; }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 body {
@@ -113,8 +121,10 @@ body {
   font: 600 11px/1 var(--mono);
   color: var(--muted);
   cursor: pointer;
+  transition: color var(--motion-fast) ease, border-color var(--motion-fast) ease, transform var(--motion-fast) var(--ease-out);
 }
 .cmd-hint kbd:hover { border-color: var(--green); color: var(--green); }
+.cmd-hint kbd:active { transform: translateY(1px); }
 
 nav { display: flex; gap: 22px; align-items: center; height: 100%; }
 .nav-button {
@@ -127,7 +137,7 @@ nav { display: flex; gap: 22px; align-items: center; height: 100%; }
   cursor: pointer;
   font: 600 13px var(--sans);
   letter-spacing: 0.01em;
-  transition: color 0.12s ease, border-color 0.12s ease;
+  transition: color var(--motion-fast) ease, border-color var(--motion-fast) ease;
 }
 .nav-button:hover { color: var(--ink); }
 .nav-button.active { color: var(--green); border-bottom-color: var(--green); }
@@ -150,11 +160,20 @@ main {
   margin-bottom: 24px;
   color: var(--ink-soft);
   font-size: 13px;
+  transition: color var(--motion-base) ease, background-color var(--motion-base) ease, border-left-color var(--motion-base) ease;
 }
 .status.error { border-left-color: var(--red); color: var(--red); background: var(--red-tint); }
 
 .view { display: none; }
-.view.active { display: block; }
+.view.active {
+  display: block;
+  animation: viewEnter var(--motion-base) var(--ease-out) both;
+}
+
+@keyframes viewEnter {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 /* ---------- panel ---------- */
 .panel {
@@ -209,13 +228,15 @@ textarea { resize: vertical; margin-bottom: 12px; font-family: var(--mono); }
   padding: 11px 18px;
   font: 700 13px/1 var(--sans);
   cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background var(--motion-fast) ease, border-color var(--motion-fast) ease, color var(--motion-fast) ease, transform var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) ease;
 }
 .primary { background: var(--green); color: var(--paper-2); }
-.primary:hover { background: var(--green-bright); }
+.primary:hover { background: var(--green-bright); box-shadow: 0 3px 9px rgba(36, 82, 60, 0.16); transform: translateY(-1px); }
 .secondary { border: 1px solid var(--line-strong); background: var(--paper-2); color: var(--ink); }
-.secondary:hover { border-color: var(--green); color: var(--green); }
+.secondary:hover { border-color: var(--green); color: var(--green); transform: translateY(-1px); }
+.primary:active, .secondary:active { transform: translateY(0); box-shadow: none; }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
+button:disabled:hover { transform: none; box-shadow: none; }
 
 /* ---------- seen bar ---------- */
 .seen-bar {
@@ -250,16 +271,20 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   font-weight: 600;
   color: var(--ink);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: color var(--motion-fast) ease, background-color var(--motion-fast) ease, border-color var(--motion-fast) ease, transform var(--motion-fast) var(--ease-out);
 }
-.chip:hover { border-color: var(--green); }
+.chip:hover { border-color: var(--green); transform: translateY(-1px); }
+.chip:active { transform: translateY(0); }
 .chip.active { background: var(--green); color: var(--paper-2); border-color: var(--green); }
 .chip-toggle { background: var(--paper-2); }
 .chip-clear { background: transparent; border: 1px dashed var(--red); color: var(--red); }
 
 /* ---------- tolerances drawer ---------- */
-.tolerances-drawer { margin-bottom: 18px; animation: fadeIn 0.15s ease-in-out; }
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.tolerances-drawer { margin-bottom: 18px; animation: drawerEnter var(--motion-base) var(--ease-out); }
+@keyframes drawerEnter {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 .tolerance-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-m); padding: 18px 20px; }
 .tolerance-head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
 .tolerance-head strong { font-size: 13.5px; color: var(--ink); }
@@ -279,15 +304,25 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   font: 600 11.5px var(--sans);
   color: var(--ink);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: color var(--motion-fast) ease, background-color var(--motion-fast) ease, border-color var(--motion-fast) ease, transform var(--motion-fast) var(--ease-out);
 }
-.preset-btn:hover { border-color: var(--green); color: var(--green); }
+.preset-btn:hover { border-color: var(--green); color: var(--green); transform: translateY(-1px); }
+.preset-btn:active { transform: translateY(0); }
 .preset-btn.active { background: var(--green); color: var(--paper-2); border-color: var(--green); }
 
 /* ---------- progress ---------- */
 .progress-wrap { display: flex; align-items: center; gap: 12px; margin: 16px 2px; }
 .progress-track { height: 6px; background: var(--line); border-radius: 10px; overflow: hidden; flex: 1; }
-.progress-track div { height: 100%; width: 0; background: var(--green); transition: width 0.25s; }
+.progress-track div { position: relative; height: 100%; width: 0; overflow: hidden; background: var(--green); transition: width 300ms var(--ease-out); }
+.progress-wrap.is-running .progress-track div::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.38), transparent);
+  transform: translateX(-100%);
+  animation: progressSweep 1.6s ease-in-out infinite;
+}
+@keyframes progressSweep { to { transform: translateX(100%); } }
 #progress-text { font-size: 12px; color: var(--muted); font-family: var(--mono); white-space: nowrap; }
 
 /* ---------- results table ---------- */
@@ -299,6 +334,11 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   margin-top: 18px;
   width: 100%;
   max-width: 100%;
+}
+.results-shell.reveal { animation: contentReveal var(--motion-base) var(--ease-out) both; }
+@keyframes contentReveal {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 .results-head { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 1px solid var(--line); }
 .results-head h2 { font: 500 21px/1 var(--serif); margin: 0; }
@@ -325,7 +365,7 @@ th.sortable::after { content: " \2195"; opacity: 0.35; font-size: 10px; }
 th.sorted-asc::after { content: " \2191"; opacity: 1; color: var(--green); }
 th.sorted-desc::after { content: " \2193"; opacity: 1; color: var(--green); }
 
-tbody tr { cursor: pointer; }
+tbody tr { cursor: pointer; transition: background-color var(--motion-fast) ease; }
 tbody tr:hover { background: var(--green-tint); }
 .ticker { font-weight: 700; font-family: var(--sans); }
 .subname { display: block; font-size: 11px; color: var(--muted); max-width: 180px; overflow: hidden; text-overflow: ellipsis; font-family: var(--sans); }
@@ -360,8 +400,10 @@ tbody tr:hover { background: var(--green-tint); }
   border: 1px solid var(--line-strong);
   background: var(--paper-2);
   margin-right: 4px;
+  transition: color var(--motion-fast) ease, background-color var(--motion-fast) ease, border-color var(--motion-fast) ease, transform var(--motion-fast) var(--ease-out);
 }
-.btn-action:hover { border-color: var(--ink); }
+.btn-action:hover { border-color: var(--ink); transform: translateY(-1px); }
+.btn-action:active { transform: translateY(0); }
 .btn-dismiss { color: var(--muted); }
 .btn-dismiss:hover { background: var(--red-tint); color: var(--red); border-color: var(--red); }
 
@@ -373,6 +415,10 @@ tbody tr:hover { background: var(--green-tint); }
 
 /* ---------- single stock report ---------- */
 .report-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-l); padding: 24px; margin-top: 16px; }
+#report.reveal .report-card { animation: contentReveal var(--motion-base) var(--ease-out) both; }
+#report.reveal .report-card:nth-child(2) { animation-delay: 35ms; }
+#report.reveal .report-card:nth-child(3) { animation-delay: 70ms; }
+#report.reveal .report-card:nth-child(n + 4) { animation-delay: 100ms; }
 .report-card h2, .report-card h3 { font-family: var(--serif); font-weight: 500; margin: 0 0 5px; letter-spacing: -0.01em; }
 .report-card h3 { font-size: 19px; }
 .report-title { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
@@ -438,9 +484,10 @@ tbody tr:hover { background: var(--green-tint); }
 
 /* ---------- command palette ---------- */
 .modal { position: fixed; inset: 0; z-index: 50; display: flex; align-items: flex-start; justify-content: center; padding-top: 110px; }
-.modal-backdrop { position: absolute; inset: 0; background: rgba(26, 35, 31, 0.45); backdrop-filter: blur(3px); }
+.modal-backdrop { position: absolute; inset: 0; background: rgba(26, 35, 31, 0.45); backdrop-filter: blur(3px); animation: backdropFade var(--motion-base) ease-out; }
 .modal-card { position: relative; background: var(--card); border: 1px solid var(--line-strong); border-radius: var(--radius-l); width: 100%; max-width: 560px; box-shadow: var(--shadow-float); overflow: hidden; animation: modalPop 0.14s ease-out; }
 @keyframes modalPop { from { opacity: 0; transform: scale(0.97) translateY(-4px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+@keyframes backdropFade { from { opacity: 0; } to { opacity: 1; } }
 
 .cmd-input-wrap { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
 .cmd-icon { font-size: 16px; color: var(--muted); font-family: var(--serif); font-style: italic; }

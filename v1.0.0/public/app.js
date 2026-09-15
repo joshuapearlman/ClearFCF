@@ -352,10 +352,12 @@ function applyFilterAndSort(results) {
   return list;
 }
 function renderTable(container, results, title) {
+  const isFirstRender = !container.querySelector(".results-shell");
   container._rawResults = results;
   container._rawTitle = title;
   const filtered = applyFilterAndSort(results);
   container.innerHTML = tableHtml(filtered, title);
+  if (isFirstRender) container.querySelector(".results-shell")?.classList.add("reveal");
   attachTableEvents(container, results);
 }
 
@@ -618,6 +620,7 @@ async function openReport(ticker) {
     const report = await request(`/api/analyze?ticker=${encodeURIComponent(ticker)}&_t=${Date.now()}`);
     state.reports[ticker] = report;
     $("#report").innerHTML = renderReport(report);
+    $("#report").classList.add("reveal");
 
     setStatus(`${ticker} analysis complete.`);
   } catch (error) {
@@ -686,6 +689,7 @@ function updateAutoUi() {
 async function runAuto() {
   const scan = state.auto;
   state.stopped = false;
+  $("#progress-wrap").classList.add("is-running");
   $("#find-button").disabled = true;
   $("#stop-button").disabled = false;
   const max = Math.min(scan.maxExamine, scan.symbols.length);
@@ -745,6 +749,7 @@ async function runAuto() {
   } catch (error) {
     setStatus(`Scan paused: ${error.message}. Press Resume to continue.`, true);
   } finally {
+    $("#progress-wrap").classList.remove("is-running");
     $("#find-button").disabled = false;
     $("#stop-button").disabled = true;
     $("#find-button").textContent = scan.complete ? "Start new scan" : "Resume scan";
@@ -1295,6 +1300,7 @@ function resetSearch() {
   try { localStorage.removeItem(STORAGE_KEY); } catch {}
   const container = $("#idea-results");
   if (container) container.innerHTML = "";
+  $("#progress-wrap")?.classList.remove("is-running");
   $("#progress-wrap")?.classList.add("hidden");
   $("#find-button").disabled = false;
   $("#stop-button").disabled = true;
