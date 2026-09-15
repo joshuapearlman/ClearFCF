@@ -491,6 +491,38 @@ async function analyzeTicker(rawTicker, options = {}) {
     shortDebtToCash: finite(cash) && cash > 0 && finite(shortDebt) && shortDebt > 0 ? shortDebt / cash : null
   };
 
+  const dividends = {
+    currentYield: finite(quoteResult?.dividends?.currentYield) ? quoteResult.dividends.currentYield : null,
+    annualRate: finite(quoteResult?.dividends?.annualRate) ? quoteResult.dividends.annualRate : null,
+    fiveYearAverageYield: finite(quoteResult?.dividends?.fiveYearAverageYield) ? quoteResult.dividends.fiveYearAverageYield : null,
+    exDividendDate: quoteResult?.dividends?.exDividendDate || null,
+    source: quoteResult?.dividends?.source || "Unavailable"
+  };
+  const quotedInsiders = quoteResult?.insiders || {};
+  const insiderDataAvailable = Boolean(quotedInsiders.source) || finite(quotedInsiders.saleCount) || finite(quotedInsiders.netShares);
+  const insiderPurchaseCount = finite(quotedInsiders.purchaseCount) ? quotedInsiders.purchaseCount : 0;
+  const hasInsiderBuying = insiderPurchaseCount > 0 || (finite(quotedInsiders.netShares) && quotedInsiders.netShares > 0);
+  const purchasePriceComparable = finite(quotedInsiders.averagePurchasePrice) && finite(price) && price > 0;
+  const tradingNearInsiderBuys = purchasePriceComparable ? price <= quotedInsiders.averagePurchasePrice * 1.10 : null;
+  const inexpensiveOnFcf = finite(valuation.priceToNfcf) && valuation.priceToNfcf > 0 && valuation.priceToNfcf <= 15;
+  const insiders = {
+    period: quotedInsiders.period || "12 months",
+    purchaseCount: insiderPurchaseCount,
+    saleCount: finite(quotedInsiders.saleCount) ? quotedInsiders.saleCount : null,
+    netShares: finite(quotedInsiders.netShares) ? quotedInsiders.netShares : null,
+    averagePurchasePrice: finite(quotedInsiders.averagePurchasePrice) ? quotedInsiders.averagePurchasePrice : null,
+    purchases: Array.isArray(quotedInsiders.purchases) ? quotedInsiders.purchases : [],
+    hasRecentBuying: hasInsiderBuying,
+    tradingNearInsiderBuys,
+    valueAligned: hasInsiderBuying && inexpensiveOnFcf && tradingNearInsiderBuys !== false,
+    signal: !insiderDataAvailable ? "Unavailable"
+      : !hasInsiderBuying ? "No recent buying found"
+      : inexpensiveOnFcf && tradingNearInsiderBuys !== false ? "Buying + inexpensive FCF"
+        : "Recent insider buying",
+    source: quotedInsiders.source || "Unavailable",
+    caveat: "A purchase can align with a low valuation, but the filing does not disclose that cheapness was the insider's motive."
+  };
+
   const warnings = [];
   if (financialSource !== "SEC Company Facts") warnings.push(`SEC filing data was unavailable (${secFallbackReason}); analysis uses Yahoo annual fundamentals and should be verified against the original filing.`);
   if (isFinancial) warnings.push("Banking/insurance-style company: conventional FCF analysis is unsuitable.");
@@ -574,6 +606,8 @@ async function analyzeTicker(rawTicker, options = {}) {
     normalized3y,
     quality,
     valuation,
+    dividends,
+    insiders,
     evidenceConfidence,
     warnings,
     filing: filing ? { ...filing, url: filingUrl(company.cik, filing) } : null,
@@ -590,6 +624,8 @@ async function analyzeTicker(rawTicker, options = {}) {
       marketCap: marketCapSource,
       debt: balanceSheet.debtSource,
       cash: balanceSheet.cashSource,
+      dividends: dividends.source,
+      insiders: insiders.source,
       financialTags: Object.fromEntries(Object.entries(extracted.series).map(([key, value]) => [key, value.tag]))
     },
     analyzedAt: new Date().toISOString()
@@ -623,6 +659,16 @@ function summary(report) {
     economicFcfYield: round(report.valuation.economicFcfYield, 4),
     averageFcfYield: round(report.valuation.averageFcfYield, 4),
     latestFcfYield: round(report.valuation.latestFcfYield, 4),
+    dividendYield: round(report.dividends?.currentYield, 4),
+    fiveYearDividendYield: round(report.dividends?.fiveYearAverageYield, 4),
+    dividendRate: round(report.dividends?.annualRate, 4),
+    exDividendDate: report.dividends?.exDividendDate || null,
+    insiderBuying: report.insiders?.hasRecentBuying === true,
+    insiderPurchaseCount: report.insiders?.purchaseCount ?? 0,
+    insiderNetShares: round(report.insiders?.netShares),
+    insiderAveragePurchasePrice: round(report.insiders?.averagePurchasePrice, 2),
+    insiderValueAligned: report.insiders?.valueAligned === true,
+    insiderSignal: report.insiders?.signal || "Unavailable",
     latestRevenue: round(report.normalized.latestRevenue),
     latestFcf: round(report.normalized.latestReportedFcf),
     averageAnnualFcf: round(report.normalized.averageAnnualFcf),

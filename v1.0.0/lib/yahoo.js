@@ -47,12 +47,14 @@ async function fetchYahooQuote(ticker) {
       const auth = await getYahooAuth(attempt > 0);
       const authHeaders = auth?.cookie ? { ...HEADERS, cookie: auth.cookie } : HEADERS;
       const crumbStr = auth?.crumb ? `&crumb=${encodeURIComponent(auth.crumb)}` : "";
-      const summaryUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=price,defaultKeyStatistics,financialData,assetProfile${crumbStr}`;
+      const summaryUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=price,defaultKeyStatistics,financialData,assetProfile,summaryDetail,insiderTransactions,netSharePurchaseActivity${crumbStr}`;
       const summaryData = await fetchJson(summaryUrl, { headers: authHeaders }, 8000);
-      const pMod = summaryData?.quoteSummary?.result?.[0]?.price;
-      const sMod = summaryData?.quoteSummary?.result?.[0]?.defaultKeyStatistics;
-      const fMod = summaryData?.quoteSummary?.result?.[0]?.financialData;
-      const profile = summaryData?.quoteSummary?.result?.[0]?.assetProfile;
+      const result = summaryData?.quoteSummary?.result?.[0];
+      const pMod = result?.price;
+      const sMod = result?.defaultKeyStatistics;
+      const fMod = result?.financialData;
+      const profile = result?.assetProfile;
+      const detail = result?.summaryDetail;
 
       const priceVal = pMod?.regularMarketPrice?.raw ?? pMod?.regularMarketPrice;
       const mcVal = pMod?.marketCap?.raw ?? pMod?.marketCap;
@@ -63,6 +65,38 @@ async function fetchYahooQuote(ticker) {
       const quickRatioVal = fMod?.quickRatio?.raw ?? (finite(fMod?.quickRatio) ? fMod?.quickRatio : null);
       const bookValueVal = sMod?.bookValue?.raw ?? (finite(sMod?.bookValue) ? sMod?.bookValue : null);
       const evVal = sMod?.enterpriseValue?.raw ?? (finite(sMod?.enterpriseValue) ? sMod?.enterpriseValue : null);
+
+      const raw = (field) => field?.raw ?? (finite(field) ? field : null);
+      const currentYield = raw(detail?.dividendYield) ?? raw(detail?.trailingAnnualDividendYield);
+      const dividendRate = raw(detail?.dividendRate) ?? raw(detail?.trailingAnnualDividendRate);
+      const fiveYearYieldPercent = raw(sMod?.fiveYearAvgDividendYield);
+      const transactions = Array.isArray(result?.insiderTransactions?.transactions)
+        ? result.insiderTransactions.transactions
+        : [];
+      const oneYearAgo = Math.floor(Date.now() / 1000) - (366 * 86400);
+      const directPurchases = transactions.filter((transaction) => {
+        const text = String(transaction?.transactionText || transaction?.text || "");
+        const date = raw(transaction?.startDate);
+        return /\bpurchase\b/i.test(text) && !/option|award|grant/i.test(text) && (!finite(date) || date >= oneYearAgo);
+      }).map((transaction) => {
+        const shares = raw(transaction.shares);
+        const value = raw(transaction.value);
+        return {
+          name: transaction.filerName || null,
+          relation: transaction.filerRelation || transaction.filerTitle || null,
+          date: finite(raw(transaction.startDate)) ? new Date(raw(transaction.startDate) * 1000).toISOString().slice(0, 10) : null,
+          shares: finite(shares) ? shares : null,
+          value: finite(value) ? value : null,
+          price: finite(value) && finite(shares) && shares > 0 ? value / shares : null,
+          description: String(transaction.transactionText || transaction.text || "Purchase")
+        };
+      });
+      const netActivity = result?.netSharePurchaseActivity || {};
+      const buyCount = raw(netActivity.buyInfoCount);
+      const sellCount = raw(netActivity.sellInfoCount);
+      const netShares = raw(netActivity.netInfoShares) ?? raw(netActivity.netSharesPurchased);
+      const purchaseShares = directPurchases.reduce((sum, item) => sum + (item.shares || 0), 0);
+      const purchaseValue = directPurchases.reduce((sum, item) => sum + (item.value || 0), 0);
 
       if (finite(priceVal)) {
         return {
@@ -81,6 +115,22 @@ async function fetchYahooQuote(ticker) {
           companyName: pMod?.longName || pMod?.shortName || ticker,
           sector: profile?.sector || null,
           industry: profile?.industry || null,
+          dividends: {
+            currentYield: finite(currentYield) ? currentYield : null,
+            annualRate: finite(dividendRate) ? dividendRate : null,
+            fiveYearAverageYield: finite(fiveYearYieldPercent) ? fiveYearYieldPercent / 100 : null,
+            exDividendDate: finite(raw(detail?.exDividendDate)) ? new Date(raw(detail.exDividendDate) * 1000).toISOString().slice(0, 10) : null,
+            source: "Yahoo Finance summary"
+          },
+          insiders: {
+            period: netActivity.period || "12 months",
+            purchaseCount: directPurchases.length || (finite(buyCount) ? buyCount : 0),
+            saleCount: finite(sellCount) ? sellCount : null,
+            netShares: finite(netShares) ? netShares : null,
+            averagePurchasePrice: purchaseShares > 0 && purchaseValue > 0 ? purchaseValue / purchaseShares : null,
+            purchases: directPurchases.slice(0, 5),
+            source: "Yahoo Finance insider transactions"
+          },
           marketTime: pMod?.regularMarketTime ? new Date(pMod.regularMarketTime * 1000).toISOString() : null,
           source: "Yahoo Finance live balance sheet & quote"
         };
@@ -103,6 +153,8 @@ async function fetchYahooQuote(ticker) {
       const qData = await fetchJson(url, { headers: HEADERS });
       const q = qData?.quoteResponse?.result?.[0];
       if (q && finite(q.regularMarketPrice)) {
+        const fallbackYield = finite(q.dividendYield) ? q.dividendYield
+          : finite(q.trailingAnnualDividendYield) ? q.trailingAnnualDividendYield : null;
         return {
           price: q.regularMarketPrice,
           marketCap: finite(q.marketCap) ? q.marketCap : null,
@@ -119,6 +171,14 @@ async function fetchYahooQuote(ticker) {
           companyName: q.longName || q.shortName || ticker,
           sector: q.sector || null,
           industry: q.industry || null,
+          dividends: {
+            currentYield: fallbackYield,
+            annualRate: finite(q.dividendRate) ? q.dividendRate
+              : finite(q.trailingAnnualDividendRate) ? q.trailingAnnualDividendRate : null,
+            fiveYearAverageYield: finite(q.fiveYearAvgDividendYield) ? q.fiveYearAvgDividendYield / 100 : null,
+            exDividendDate: finite(q.exDividendDate) ? new Date(q.exDividendDate * 1000).toISOString().slice(0, 10) : null,
+            source: "Yahoo Finance quote"
+          },
           marketTime: q.regularMarketTime ? new Date(q.regularMarketTime * 1000).toISOString() : null,
           source: "Yahoo Finance quote"
         };

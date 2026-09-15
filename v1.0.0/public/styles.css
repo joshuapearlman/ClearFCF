@@ -416,7 +416,7 @@ button:disabled:hover { transform: none; box-shadow: none; }
 .metrics-toggle:hover { border-color: var(--green); color: var(--green); }
 
 .table-scroll { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; display: block; }
-table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 820px; font-variant-numeric: tabular-nums; }
+table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 1120px; font-variant-numeric: tabular-nums; }
 th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; font-family: var(--mono); font-size: 12.5px; }
 td .ticker, td .subname { font-family: var(--sans); }
 th {
@@ -439,7 +439,7 @@ th.sorted-desc::after { content: " \2193"; opacity: 1; color: var(--green); }
 
 .optional-metric { display: none; }
 .results-shell.show-more .optional-metric { display: table-cell; }
-.results-shell.show-more table { min-width: 1550px; }
+.results-shell.show-more table { min-width: 1850px; }
 .results-shell .col-action, .results-shell .col-company, .results-shell .col-status { position: sticky; background: var(--card); }
 .results-shell th.col-action, .results-shell th.col-company, .results-shell th.col-status { z-index: 8; background: var(--paper-2); }
 .results-shell td.col-action, .results-shell td.col-company, .results-shell td.col-status { z-index: 3; }

@@ -28,9 +28,12 @@ test("analysis falls back to Yahoo fundamentals when SEC returns 403", async () 
     if (href.includes("sec.gov")) return json({ error: "blocked" }, 403);
     if (href.includes("quoteSummary")) return json({ quoteSummary: { result: [{
       price: { regularMarketPrice: { raw: 10 }, marketCap: { raw: 1_000_000_000 }, currency: "USD", quoteType: "EQUITY", longName: "Fallback Company" },
-      defaultKeyStatistics: { sharesOutstanding: { raw: 100_000_000 } },
+      defaultKeyStatistics: { sharesOutstanding: { raw: 100_000_000 }, fiveYearAvgDividendYield: { raw: 1.8 } },
       financialData: { totalDebt: { raw: 100_000_000 }, totalCash: { raw: 200_000_000 } },
-      assetProfile: { sector: "Technology", industry: "Software" }
+      assetProfile: { sector: "Technology", industry: "Software" },
+      summaryDetail: { dividendYield: { raw: 0.024 }, dividendRate: { raw: 0.24 }, exDividendDate: { raw: Date.parse("2026-08-01") / 1000 } },
+      insiderTransactions: { transactions: [{ filerName: "A Director", transactionText: "Purchase", shares: { raw: 10_000 }, value: { raw: 100_000 }, startDate: { raw: Date.parse("2026-07-01") / 1000 } }] },
+      netSharePurchaseActivity: { period: "6m", buyInfoCount: { raw: 1 }, sellInfoCount: { raw: 0 }, netInfoShares: { raw: 10_000 } }
     }] } });
     if (href.includes("fundamentals-timeseries")) {
       const quarterly = (tag, value) => ({ meta: { symbol: ["FALL"], type: [tag] }, [tag]: [{ asOfDate: "2025-12-31", periodType: "3M", currencyCode: "USD", reportedValue: { raw: value } }] });
@@ -58,6 +61,11 @@ test("analysis falls back to Yahoo fundamentals when SEC returns 403", async () 
     assert.equal(report.sources.financials, "Yahoo Finance fundamentals fallback");
     assert.equal(report.evidenceConfidence.level, "Partial");
     assert.equal(report.status, "Idea");
+    assert.equal(report.dividends.currentYield, 0.024);
+    assert.ok(Math.abs(report.dividends.fiveYearAverageYield - 0.018) < 1e-12);
+    assert.equal(report.insiders.hasRecentBuying, true);
+    assert.equal(report.insiders.valueAligned, true);
+    assert.equal(report.insiders.averagePurchasePrice, 10);
     assert.ok(report.warnings.some((warning) => warning.includes("SEC filing data was unavailable")));
   } finally {
     global.fetch = originalFetch;

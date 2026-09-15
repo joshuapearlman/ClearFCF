@@ -89,6 +89,8 @@
         <button type="button" class="chip" data-filter="buybacks">Share buybacks (&lt; 0% dilution)</button>
         <button type="button" class="chip" data-filter="sub-10">Deep value (&lt; 10x FCF)</button>
         <button type="button" class="chip" data-filter="expanding">Expanding FCF trend</button>
+        <button type="button" class="chip" data-filter="dividend-payers">Dividend payers</button>
+        <button type="button" class="chip" data-filter="insider-buying">Recent insider buying</button>
         <button type="button" class="chip chip-toggle" id="toggle-tolerances">Filter tolerances</button>
         <button type="button" class="chip chip-clear hidden" id="clear-chips">Clear filters</button>
       </div>
@@ -143,6 +145,10 @@
             <div class="tol-item">
               <div class="tol-label"><span>Min Positive FCF Years</span> <strong id="tol-posfcf-val">67%</strong></div>
               <input type="range" id="tol-posfcf" min="40" max="100" step="1" value="67">
+            </div>
+            <div class="tol-item display-filter-item">
+              <div class="tol-label"><span>Min Dividend Yield <small>(display only)</small></span> <strong id="filter-dividend-val">Any</strong></div>
+              <input type="range" id="filter-dividend" min="0" max="10" step="0.5" value="0">
             </div>
             <div class="tol-item tol-toggle-item">
               <label class="checkbox-label"><input type="checkbox" id="tol-solvency" checked> Enforce Near-Term Debt Solvency</label>

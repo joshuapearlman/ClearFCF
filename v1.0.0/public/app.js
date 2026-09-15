@@ -65,6 +65,7 @@ const state = {
   reports: {},
   stopped: false,
   activeFilters: new Set(),
+  displayFilters: { minDividendYield: 0 },
   sortKey: 'priceToNfcf',
   sortAsc: true,
   showMoreMetrics: false,
@@ -230,6 +231,9 @@ function tableHtml(results, title) {
             <th class="sortable optional-metric" data-sort="priceToEconomicNfcf">P/Econ nFCF</th>
             <th class="sortable optional-metric" data-sort="evToUnleveredNfcf">EV/Unlevered</th>
             <th class="sortable" data-sort="fcfYield">FCF yield</th>
+            <th class="sortable" data-sort="dividendYield">Dividend yield</th>
+            <th class="sortable optional-metric" data-sort="fiveYearDividendYield">5Y div. avg</th>
+            <th class="sortable" data-sort="insiderSignal">Insiders</th>
             <th class="sortable optional-metric" data-sort="economicFcfYield">Econ yield</th>
             <th class="sortable optional-metric" data-sort="fcfTrajectory">FCF Trend</th>
             <th class="sortable optional-metric" data-sort="buybackRating">Buyback Audit</th>
@@ -248,6 +252,7 @@ function tableHtml(results, title) {
               ${row.netDebtToNfcf !== null && row.netDebtToNfcf < 0 ? '<span class="badge badge-netcash" title="Net cash position">Net Cash</span>' : ''}
               ${row.fcfTrajectory === 'Expanding' ? '<span class="badge badge-green" title="3-year margin expanding">Expanding</span>' : ''}
               ${row.buybackRating === 'Accretive' ? '<span class="badge badge-blue" title="Historical buybacks executed at a discount">Accretive Buyback</span>' : ''}
+              ${row.insiderValueAligned ? '<span class="badge badge-blue" title="Recent disclosed insider buying overlaps with an inexpensive P/nFCF; motive is not known">Insider + Value</span>' : row.insiderBuying ? '<span class="badge badge-green" title="Recent disclosed insider purchase activity">Insider Buying</span>' : ''}
               ${row.latestSbcToFcf && row.latestSbcToFcf > 0.25 ? '<span class="badge badge-amber" title="SBC absorbs >25% of FCF">High SBC</span>' : ''}
             </td>
             <td class="col-status" title="${escapeHtml([...(row.evaluation?.exclusions || []), ...(row.evaluation?.failures || []), ...(row.evaluation?.unknowns || [])].join("\n"))}"><span class="badge ${String(row.status).toLowerCase()}">${escapeHtml(row.status)}</span></td>
@@ -257,6 +262,9 @@ function tableHtml(results, title) {
             <td class="optional-metric">${multiple(row.priceToEconomicNfcf)}</td>
             <td class="optional-metric">${multiple(row.evToUnleveredNfcf)}</td>
             <td>${percent(row.fcfYield)}</td>
+            <td title="Current indicated or trailing annual dividend yield">${percent(row.dividendYield)}</td>
+            <td class="optional-metric" title="Yahoo Finance five-year average dividend yield">${percent(row.fiveYearDividendYield)}</td>
+            <td title="Purchase activity is evidence of buying, not proof the insider considered the shares cheap"><span class="badge ${row.insiderValueAligned ? 'badge-blue' : row.insiderBuying ? 'badge-green' : ''}">${escapeHtml(row.insiderSignal || 'Unavailable')}</span></td>
             <td class="optional-metric">${percent(row.economicFcfYield)}</td>
             <td class="optional-metric"><span class="badge ${row.fcfTrajectory === 'Expanding' ? 'badge-green' : row.fcfTrajectory === 'Deteriorating' ? 'badge-amber' : ''}">${escapeHtml(row.fcfTrajectory || 'Stable')}</span></td>
             <td class="optional-metric"><span class="badge ${row.buybackRating === 'Accretive' ? 'badge-green' : row.buybackRating === 'Value Destructive' ? 'badge-amber' : ''}">${escapeHtml(row.buybackRating || 'N/A')}</span></td>
@@ -377,6 +385,16 @@ function applyFilterAndSort(results) {
   if (state.activeFilters.has('expanding')) {
     list = list.filter((r) => r.fcfTrajectory === 'Expanding');
   }
+  if (state.activeFilters.has('dividend-payers')) {
+    list = list.filter((r) => typeof r.dividendYield === 'number' && r.dividendYield > 0);
+  }
+  if (state.activeFilters.has('insider-buying')) {
+    list = list.filter((r) => r.insiderBuying === true);
+  }
+  const minDividendYield = Number(state.displayFilters.minDividendYield) || 0;
+  if (minDividendYield > 0) {
+    list = list.filter((r) => typeof r.dividendYield === 'number' && r.dividendYield >= minDividendYield);
+  }
 
   // 3. Column Sorting
   if (state.sortKey) {
@@ -402,7 +420,7 @@ function renderTable(container, results, title) {
 }
 
 function exportCsv(results) {
-  const fields = ["ticker", "companyName", "status", "price", "marketCap", "priceToNfcf", "priceToEconomicNfcf", "evToUnleveredNfcf", "fcfYield", "economicFcfYield", "fcfTrajectory", "buybackRating", "buybackPrice", "capexToDnaRatio", "usableYears", "netDebtToNfcf", "shortDebt", "cash", "shareChange", "latestSbcToFcf"];
+  const fields = ["ticker", "companyName", "status", "price", "marketCap", "priceToNfcf", "priceToEconomicNfcf", "evToUnleveredNfcf", "fcfYield", "dividendYield", "fiveYearDividendYield", "dividendRate", "exDividendDate", "insiderBuying", "insiderPurchaseCount", "insiderNetShares", "insiderAveragePurchasePrice", "insiderValueAligned", "insiderSignal", "economicFcfYield", "fcfTrajectory", "buybackRating", "buybackPrice", "capexToDnaRatio", "usableYears", "netDebtToNfcf", "shortDebt", "cash", "shareChange", "latestSbcToFcf"];
   const quote = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
   const csv = [fields.join(","), ...results.map((row) => fields.map((key) => quote(row[key])).join(","))].join("\n");
   const link = document.createElement("a");
@@ -610,6 +628,9 @@ function renderReport(report) {
     <div class="metric clickable" data-metric="evToUnleveredNfcf"><span>EV/Unlevered nFCF</span><strong>${multiple(v.evToUnleveredNfcf)}</strong><span class="metric-hint">How it was calculated</span></div>
     <div class="metric clickable" data-metric="fcfYield"><span>Normalized FCF yield</span><strong>${percent(v.fcfYield)}</strong><span class="metric-hint">How it was calculated</span></div>
     <div class="metric clickable" data-metric="economicFcfYield"><span>Economic FCF yield</span><strong>${percent(v.economicFcfYield)}</strong><span class="metric-hint">How it was calculated</span></div>
+    <div class="metric clickable" data-metric="dividendYield"><span>Current dividend yield</span><strong>${percent(report.dividends?.currentYield)}</strong><small>${report.dividends?.annualRate ? `${compact(report.dividends.annualRate, true)} indicated annual dividend` : 'No current dividend rate available'}</small><span class="metric-hint">Source and interpretation</span></div>
+    <div class="metric clickable" data-metric="fiveYearDividendYield"><span>5-year average dividend yield</span><strong>${percent(report.dividends?.fiveYearAverageYield)}</strong><small>Historical context; not a screening criterion</small><span class="metric-hint">Source and interpretation</span></div>
+    <div class="metric clickable" data-metric="insiderActivity"><span>Insider activity</span><strong class="${report.insiders?.valueAligned ? 'badge-blue' : report.insiders?.hasRecentBuying ? 'badge-green' : ''}">${escapeHtml(report.insiders?.signal || 'Unavailable')}</strong><small>${report.insiders?.purchaseCount || 0} purchase record${report.insiders?.purchaseCount === 1 ? '' : 's'} in ${escapeHtml(report.insiders?.period || 'the reported period')}</small><span class="metric-hint">Evidence and caveat</span></div>
     <div class="metric clickable" data-metric="fcfTrajectory"><span>FCF Trajectory</span><strong class="${q.fcfTrajectory === 'Expanding' ? 'badge-green' : q.fcfTrajectory === 'Deteriorating' ? 'badge-amber' : ''}">${escapeHtml(q.fcfTrajectory || 'Stable')}</strong><span class="metric-hint">How it was calculated</span></div>
     <div class="metric clickable" data-metric="buybackAudit"><span>Buyback Audit</span><strong class="${q.buybackAudit?.rating === 'Accretive' ? 'badge-green' : q.buybackAudit?.rating === 'Value Destructive' ? 'badge-amber' : ''}">${escapeHtml(q.buybackAudit?.rating || 'N/A')}</strong><small>${q.buybackAudit?.averageBuybackPrice ? `Avg paid: $${q.buybackAudit.averageBuybackPrice.toFixed(2)}` : 'No major repurchases'}</small><span class="metric-hint">How it was calculated</span></div>
     <div class="metric clickable" data-metric="capexToDnaRatio"><span>CapEx / D&A</span><strong>${q.capexToDnaRatio ? `${(q.capexToDnaRatio * 100).toFixed(0)}%` : "—"}</strong><span class="metric-hint">How it was calculated</span></div>
@@ -983,6 +1004,13 @@ function refreshActiveTable() {
 
 initFilterChips();
 
+$("#filter-dividend")?.addEventListener("input", (event) => {
+  const percentValue = Number(event.target.value) || 0;
+  state.displayFilters.minDividendYield = percentValue / 100;
+  $("#filter-dividend-val").textContent = percentValue > 0 ? `${percentValue.toFixed(1)}%+` : "Any";
+  refreshActiveTable();
+});
+
 // Command Palette (Cmd+K)
 function initCommandPalette() {
   const palette = $("#cmd-palette");
@@ -1124,6 +1152,33 @@ function getCalculationDetails(metric, report) {
         substitution: `${compact(price, true)} (Price) × ${compact(shares)} (Shares Outstanding)\n= ${compact(mc, true)} Total Equity Valuation`,
         meaning: 'Represents the aggregate dollar value of all equity shares in the market at current pricing.',
         sources: `Shares: ${v.shareSource || "SEC 10-K Weighted Average Diluted Shares"} • Price: Yahoo Finance`
+      };
+
+    case 'dividendYield':
+      return {
+        title: 'Current Dividend Yield',
+        formula: 'Dividend yield = Indicated annual dividend per share ÷ Current share price',
+        substitution: `Annual dividend: ${compact(report.dividends?.annualRate, true)}\nCurrent price: ${compact(price, true)}\nCurrent yield: ${percent(report.dividends?.currentYield)}\nEx-dividend date: ${report.dividends?.exDividendDate || 'Unavailable'}`,
+        meaning: 'This is the most relevant yield for income available at today’s price. It is informational only and does not change the ClearFCF Idea/Review decision.',
+        sources: report.sources.dividends || 'Yahoo Finance summary data'
+      };
+
+    case 'fiveYearDividendYield':
+      return {
+        title: 'Five-Year Average Dividend Yield',
+        formula: 'Average of historical dividend yields over five years',
+        substitution: `Current yield: ${percent(report.dividends?.currentYield)}\nFive-year average: ${percent(report.dividends?.fiveYearAverageYield)}`,
+        meaning: 'Comparing current yield with its five-year average can flag an unusually high yield, but a higher yield may reflect a falling share price or dividend risk. It is context, not a quality score.',
+        sources: report.sources.dividends || 'Yahoo Finance summary data'
+      };
+
+    case 'insiderActivity':
+      return {
+        title: 'Recent Insider Purchase Activity',
+        formula: 'Signal = disclosed purchase activity + independent P/nFCF valuation check',
+        substitution: `Purchase records: ${report.insiders?.purchaseCount || 0}\nNet shares reported: ${compact(report.insiders?.netShares)}\nAverage disclosed purchase price: ${compact(report.insiders?.averagePurchasePrice, true)}\nCurrent price: ${compact(price, true)}\nP/nFCF: ${multiple(v.priceToNfcf)}\nSignal: ${report.insiders?.signal || 'Unavailable'}`,
+        meaning: report.insiders?.caveat || 'Insider buying can align incentives, but the transaction disclosure does not prove why the insider bought.',
+        sources: report.sources.insiders || 'Yahoo Finance insider transaction data'
       };
 
     case 'normalizedFcf':
