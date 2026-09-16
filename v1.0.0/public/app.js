@@ -135,6 +135,42 @@ function initPerformanceSettings() {
 
 initPerformanceSettings();
 
+function applyPerformanceSettings(settings) {
+  for (const [key, config] of Object.entries(PERFORMANCE_FIELDS)) {
+    const input = $(config.selector);
+    if (input) input.value = String(settings[key]);
+  }
+  return readPerformanceSettings(true);
+}
+
+function openSettings() {
+  const modal = $("#settings-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  $("#settings-button")?.setAttribute("aria-expanded", "true");
+  $("#scan-workers")?.focus();
+}
+
+function closeSettings() {
+  readPerformanceSettings(true);
+  $("#settings-modal")?.classList.add("hidden");
+  $("#settings-button")?.setAttribute("aria-expanded", "false");
+  $("#settings-button")?.focus();
+}
+
+$("#settings-button")?.setAttribute("aria-expanded", "false");
+$("#settings-button")?.addEventListener("click", openSettings);
+$("#settings-backdrop")?.addEventListener("click", closeSettings);
+$("#settings-close-button")?.addEventListener("click", closeSettings);
+$("#settings-done-button")?.addEventListener("click", closeSettings);
+$("#default-speed-button")?.addEventListener("click", () => {
+  applyPerformanceSettings(DEFAULT_PERFORMANCE);
+  setStatus("Default scan speed restored: 1 worker, 250ms pacing, 400ms pause, batch size 8.");
+});
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("#settings-modal")?.classList.contains("hidden")) closeSettings();
+});
+
 function getReviewedTickers() {
   try { return new Set(JSON.parse(localStorage.getItem(REVIEWED_KEY)) || []); }
   catch { return new Set(); }

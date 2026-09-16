@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-  <link rel="stylesheet" href="/styles.css?v=3">
+  <link rel="stylesheet" href="/styles.css?v=4">
   <link rel="stylesheet" href="/audit.css">
 </head>
 <body>
@@ -25,11 +25,14 @@
       </a>
       <span class="cmd-hint" title="Press Cmd+K or Ctrl+K to jump to a stock"><kbd>⌘K</kbd></span>
     </div>
-    <nav aria-label="Primary">
-      <button class="nav-button active" data-view="ideas"><span class="nav-icon" aria-hidden="true">⌕</span><span class="nav-label-full">Idea Finder</span><span class="nav-label-short">Ideas</span></button>
-      <button class="nav-button" data-view="screen"><span class="nav-icon" aria-hidden="true">≡</span><span class="nav-label-full">Paste Tickers</span><span class="nav-label-short">Watchlist</span></button>
-      <button class="nav-button" data-view="analyze"><span class="nav-icon" aria-hidden="true">↗</span><span class="nav-label-full">Analyze Stock</span><span class="nav-label-short">Analyze</span></button>
-    </nav>
+    <div class="header-actions">
+      <nav aria-label="Primary">
+        <button class="nav-button active" data-view="ideas"><span class="nav-icon" aria-hidden="true">⌕</span><span class="nav-label-full">Idea Finder</span><span class="nav-label-short">Ideas</span></button>
+        <button class="nav-button" data-view="screen"><span class="nav-icon" aria-hidden="true">≡</span><span class="nav-label-full">Paste Tickers</span><span class="nav-label-short">Watchlist</span></button>
+        <button class="nav-button" data-view="analyze"><span class="nav-icon" aria-hidden="true">↗</span><span class="nav-label-full">Analyze Stock</span><span class="nav-label-short">Analyze</span></button>
+      </nav>
+      <button id="settings-button" class="settings-button" type="button" aria-label="Open settings" aria-haspopup="dialog" aria-controls="settings-modal" title="Settings">⚙</button>
+    </div>
   </header>
 
   <main>
@@ -73,26 +76,6 @@
             <button id="find-button" class="primary">Find stocks</button>
             <button id="stop-button" class="secondary hidden" disabled>Pause scan</button>
             <button id="reset-search-btn" class="utility-button" type="button" title="Clear search results and reset">Reset</button>
-          </div>
-          <div class="performance-box" aria-labelledby="performance-title">
-            <div class="performance-heading">
-              <strong id="performance-title">Scan performance</strong>
-              <span>Changes apply to the next batch</span>
-            </div>
-            <div class="performance-fields">
-              <label>Workers
-                <input id="scan-workers" type="number" inputmode="numeric" min="1" max="8" step="1" value="1">
-              </label>
-              <label>Pacing (ms)
-                <input id="scan-pacing" type="number" inputmode="numeric" min="0" max="5000" step="25" value="250">
-              </label>
-              <label>Front-end pause (ms)
-                <input id="scan-frontend-pause" type="number" inputmode="numeric" min="0" max="10000" step="25" value="400">
-              </label>
-              <label>Batch size
-                <input id="scan-batch-size" type="number" inputmode="numeric" min="1" max="25" step="1" value="8">
-              </label>
-            </div>
           </div>
         </div>
       </div>
@@ -287,6 +270,41 @@
     </div>
   </div>
 
+  <!-- SETTINGS -->
+  <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="modal-backdrop" id="settings-backdrop"></div>
+    <div class="modal-card settings-modal-card">
+      <div class="settings-head">
+        <div>
+          <span class="calc-kicker">Settings</span>
+          <h2 id="settings-title">Scan performance</h2>
+        </div>
+        <button type="button" class="btn-close" id="settings-close-button" aria-label="Close settings">✕</button>
+      </div>
+      <div class="settings-body">
+        <p>Fine-tune scan speed. Changes are saved automatically and apply when the next batch starts.</p>
+        <div class="performance-fields">
+          <label>Workers
+            <input id="scan-workers" type="number" inputmode="numeric" min="1" max="8" step="1" value="1">
+          </label>
+          <label>Pacing (ms)
+            <input id="scan-pacing" type="number" inputmode="numeric" min="0" max="5000" step="25" value="250">
+          </label>
+          <label>Front-end pause (ms)
+            <input id="scan-frontend-pause" type="number" inputmode="numeric" min="0" max="10000" step="25" value="400">
+          </label>
+          <label>Batch size
+            <input id="scan-batch-size" type="number" inputmode="numeric" min="1" max="25" step="1" value="8">
+          </label>
+        </div>
+      </div>
+      <div class="settings-footer">
+        <button id="default-speed-button" class="secondary" type="button">Restore default speed</button>
+        <button id="settings-done-button" class="primary" type="button">Done</button>
+      </div>
+    </div>
+  </div>
+
   <!-- COMMAND PALETTE (CMD+K) -->
   <div id="cmd-palette" class="modal hidden" role="dialog" aria-modal="true" aria-label="Command Palette">
     <div class="modal-backdrop" id="cmd-backdrop"></div>
@@ -321,6 +339,6 @@
   </footer>
 
   <script src="/screening.js?v=2" defer></script>
-  <script src="/app.js?v=3" defer></script>
+  <script src="/app.js?v=4" defer></script>
 </body>
 </html>
