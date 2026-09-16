@@ -884,7 +884,7 @@ async function analyzeBatch(tickers, options = {}) {
         failures.push({ ticker, error: error.message || "Analysis failed." });
       }
       // Pace ticker analyses to reduce the risk of Yahoo/SEC rate limiting.
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 250));
     }
   }
   await Promise.all(Array.from({ length: workers }, worker));
