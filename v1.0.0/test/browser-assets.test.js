@@ -10,7 +10,7 @@ test("browser screening asset loads before app.js and exposes its API", () => {
   const publicDir = path.resolve(__dirname, "../public");
   const index = fs.readFileSync(path.join(publicDir, "index.html"), "utf8");
   const screeningPosition = index.indexOf("/screening.js?v=2");
-  const appPosition = index.indexOf("/app.js?v=2");
+  const appPosition = index.indexOf("/app.js?v=3");
   assert.ok(screeningPosition >= 0 && screeningPosition < appPosition);
 
   const context = { window: {} };

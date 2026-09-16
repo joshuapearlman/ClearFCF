@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=3">
   <link rel="stylesheet" href="/audit.css">
 </head>
 <body>
@@ -73,6 +73,26 @@
             <button id="find-button" class="primary">Find stocks</button>
             <button id="stop-button" class="secondary hidden" disabled>Pause scan</button>
             <button id="reset-search-btn" class="utility-button" type="button" title="Clear search results and reset">Reset</button>
+          </div>
+          <div class="performance-box" aria-labelledby="performance-title">
+            <div class="performance-heading">
+              <strong id="performance-title">Scan performance</strong>
+              <span>Changes apply to the next batch</span>
+            </div>
+            <div class="performance-fields">
+              <label>Workers
+                <input id="scan-workers" type="number" inputmode="numeric" min="1" max="8" step="1" value="1">
+              </label>
+              <label>Pacing (ms)
+                <input id="scan-pacing" type="number" inputmode="numeric" min="0" max="5000" step="25" value="250">
+              </label>
+              <label>Front-end pause (ms)
+                <input id="scan-frontend-pause" type="number" inputmode="numeric" min="0" max="10000" step="25" value="400">
+              </label>
+              <label>Batch size
+                <input id="scan-batch-size" type="number" inputmode="numeric" min="1" max="25" step="1" value="8">
+              </label>
+            </div>
           </div>
         </div>
       </div>
@@ -301,6 +321,6 @@
   </footer>
 
   <script src="/screening.js?v=2" defer></script>
-  <script src="/app.js?v=2" defer></script>
+  <script src="/app.js?v=3" defer></script>
 </body>
 </html>

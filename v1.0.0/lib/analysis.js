@@ -873,8 +873,10 @@ async function analyzeBatch(tickers, options = {}) {
   const reports = {};
   const failures = [];
   let index = 0;
-  // Use 1 worker to ensure serialized, rate-safe requests to Yahoo and SEC
-  const workers = 1;
+  const requestedWorkers = Number(options.workers);
+  const requestedPacing = Number(options.pacingMs);
+  const workers = Number.isFinite(requestedWorkers) ? Math.min(8, Math.max(1, Math.round(requestedWorkers))) : 1;
+  const pacingMs = Number.isFinite(requestedPacing) ? Math.min(5000, Math.max(0, Math.round(requestedPacing))) : 250;
   async function worker() {
     while (index < tickers.length) {
       const ticker = tickers[index++];
@@ -884,7 +886,7 @@ async function analyzeBatch(tickers, options = {}) {
         failures.push({ ticker, error: error.message || "Analysis failed." });
       }
       // Pace ticker analyses to reduce the risk of Yahoo/SEC rate limiting.
-      await new Promise((r) => setTimeout(r, 250));
+      if (pacingMs > 0) await new Promise((r) => setTimeout(r, pacingMs));
     }
   }
   await Promise.all(Array.from({ length: workers }, worker));

@@ -95,6 +95,45 @@ function decisionText(row, evaluation) {
 
 const STORAGE_KEY = "clear-fcf-auto-v3";
 const REVIEWED_KEY = "clear-fcf-reviewed-v2";
+const PERFORMANCE_KEY = "clear-fcf-performance-v1";
+const DEFAULT_PERFORMANCE = { workers: 1, pacingMs: 250, frontendPauseMs: 400, batchSize: 8 };
+const PERFORMANCE_FIELDS = {
+  workers: { selector: "#scan-workers", min: 1, max: 8 },
+  pacingMs: { selector: "#scan-pacing", min: 0, max: 5000 },
+  frontendPauseMs: { selector: "#scan-frontend-pause", min: 0, max: 10000 },
+  batchSize: { selector: "#scan-batch-size", min: 1, max: 25 }
+};
+
+function clampInteger(value, fallback, min, max) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(parsed)));
+}
+
+function readPerformanceSettings(normalizeInputs = false) {
+  const settings = {};
+  for (const [key, config] of Object.entries(PERFORMANCE_FIELDS)) {
+    const input = $(config.selector);
+    settings[key] = clampInteger(input?.value, DEFAULT_PERFORMANCE[key], config.min, config.max);
+    if (normalizeInputs && input) input.value = String(settings[key]);
+  }
+  try { localStorage.setItem(PERFORMANCE_KEY, JSON.stringify(settings)); } catch {}
+  return settings;
+}
+
+function initPerformanceSettings() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(PERFORMANCE_KEY)) || {}; } catch {}
+  for (const [key, config] of Object.entries(PERFORMANCE_FIELDS)) {
+    const input = $(config.selector);
+    if (!input) continue;
+    input.value = String(clampInteger(saved[key], DEFAULT_PERFORMANCE[key], config.min, config.max));
+    input.addEventListener("input", () => readPerformanceSettings(false));
+    input.addEventListener("change", () => readPerformanceSettings(true));
+  }
+}
+
+initPerformanceSettings();
 
 function getReviewedTickers() {
   try { return new Set(JSON.parse(localStorage.getItem(REVIEWED_KEY)) || []); }
@@ -784,18 +823,24 @@ $("#analyze-form").addEventListener("submit", (event) => {
 async function screenInBatches(tickers, onBatch) {
   const all = [];
   const failures = [];
-  for (let index = 0; index < tickers.length; index += 10) {
-    const batch = tickers.slice(index, index + 10);
+  let index = 0;
+  while (index < tickers.length) {
+    const performance = readPerformanceSettings(true);
+    const batch = tickers.slice(index, index + performance.batchSize);
     const data = await request("/api/screen", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tickers: batch, criteria: state.criteria })
+      body: JSON.stringify({ tickers: batch, criteria: state.criteria, performance })
     });
+    index += batch.length;
     all.push(...data.results);
     all.sort((a, b) => Number(b.passesDefaultIdeaFilter) - Number(a.passesDefaultIdeaFilter) || (a.priceToNfcf ?? 999) - (b.priceToNfcf ?? 999));
     failures.push(...data.failures);
     Object.assign(state.reports, data.reports);
-    if (onBatch) onBatch(index + batch.length, all, failures);
+    if (onBatch) onBatch(index, all, failures);
+    if (index < tickers.length && performance.frontendPauseMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, performance.frontendPauseMs));
+    }
   }
   return { results: all, failures };
 }
@@ -842,13 +887,17 @@ function updateAutoUi() {
   $("#progress-text").textContent = `${examined}/${max} examined • ${scan.results.length} ${scan.results.length === 1 ? "idea" : "ideas"} found`;
   $("#scan-percent").textContent = `${percentComplete}%`;
   $("#scan-examined").textContent = `${examined} / ${max}`;
-  $("#scan-batch").textContent = examined ? `${Math.ceil(examined / 8)} / ${Math.ceil(max / 8)}` : `— / ${Math.ceil(max / 8)}`;
+  const performance = readPerformanceSettings();
+  const batchSize = performance.batchSize;
+  $("#scan-batch").textContent = examined ? `${Math.ceil(examined / batchSize)} / ${Math.ceil(max / batchSize)}` : `— / ${Math.ceil(max / batchSize)}`;
   $("#scan-ideas").textContent = String(scan.results.length);
   $("#scan-failures").textContent = String(scan.failures.length);
   $("#scan-eta").textContent = eta;
   $("#scan-state").textContent = scan.complete ? "Scan complete" : state.stopped ? "Scan paused" : "Analyzing companies";
   const health = $("#scan-health");
-  health.textContent = scan.rateLimited ? "Rate limit pause" : "Pacing active";
+  health.textContent = scan.rateLimited
+    ? "Rate limit pause"
+    : `${performance.workers} worker${performance.workers === 1 ? "" : "s"} • ${performance.pacingMs}ms pacing`;
   health.classList.toggle("health-warning", Boolean(scan.rateLimited));
   health.classList.toggle("health-good", !scan.rateLimited);
   if (examined > 0) renderTable($("#idea-results"), scan.allExamined || scan.results, "Analyzed companies", "Idea");
@@ -872,7 +921,8 @@ async function runAuto() {
     scan.allExamined = scan.allExamined || [];
 
     while (scan.cursor < max && !state.stopped) {
-      const batchRows = scan.symbols.slice(scan.cursor, scan.cursor + 8);
+      const performance = readPerformanceSettings(true);
+      const batchRows = scan.symbols.slice(scan.cursor, scan.cursor + performance.batchSize);
       const unreviewedRows = batchRows.filter((item) => !reviewed.has(item.ticker));
       if (!unreviewedRows.length) {
         scan.cursor += batchRows.length;
@@ -886,7 +936,8 @@ async function runAuto() {
         body: JSON.stringify({
           tickers: batch,
           quotes: unreviewedRows.map(({ ticker, price, marketCap }) => ({ ticker, price, marketCap })),
-          criteria: state.criteria
+          criteria: state.criteria,
+          performance
         })
       });
       scan.cursor += batchRows.length;
@@ -916,7 +967,9 @@ async function runAuto() {
       } else {
         scan.rateLimited = false;
         setStatus(`Auto Finder: examined ${scan.cursor} and found ${scan.results.length} ideas.`);
-        await new Promise((r) => setTimeout(r, 400));
+        if (performance.frontendPauseMs > 0) {
+          await new Promise((r) => setTimeout(r, performance.frontendPauseMs));
+        }
       }
     }
     scan.complete = scan.cursor >= max;
