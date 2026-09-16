@@ -49,6 +49,12 @@ The `.github/workflows/mac-release.yml` workflow runs on `v*` tags, builds the M
 - **Unlevered EV Multiple**: Compares Enterprise Value to Unlevered Normalized FCF (adding back after-tax net interest)
 - **Solvency & Near-Term Debt Test**: Flags companies where short-term debt due within 12 months exceeds available cash + annual cash generation
 - **Under-Investment Diagnostic**: Compares cumulative CapEx against cumulative Depreciation & Amortization
+- **Dividend Safety**: Current and five-year average yield, normalized-FCF payout coverage, dividend growth, and cut detection
+- **Shareholder Yield**: Combines dividend cash, gross repurchases, and the economic cost of stock compensation
+- **Insider Purchase Evidence**: Open-market purchase signals in screening summaries plus recent SEC Form 4 evidence in full reports
+- **Historical Valuation Context**: Five-year reported P/FCF observations, percentile context, and 52-week drawdown
+- **Complete Result Funnel**: Separate Idea, Review, Excluded, and All tabs retain near-misses and missing-data cases
+- **Decision Explanations & Freshness**: Plain-language result summaries with market, filing-period, and insider-activity dates
 - Detailed single-company reports and calculation audits
 - Evidence-confidence gating with explicit pass, fail, exclusion, and unknown reasons
 - Per-year XBRL provenance (hover an annual period in a company report)

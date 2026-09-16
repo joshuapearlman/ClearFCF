@@ -57,6 +57,10 @@ const TAGS = {
   ],
   buybackShares: [
     "StockRepurchasedAndRetiredDuringPeriodShares", "TreasuryStockSharesAcquired", "StockRepurchasedDuringPeriodShares"
+  ],
+  dividendsPaid: [
+    "PaymentsOfDividends", "PaymentsOfDividendsCommonStock", "PaymentsOfOrdinaryDividends",
+    "DividendsCommonStockCash", "PaymentsOfDividendsMinorityInterest"
   ]
 };
 
@@ -72,15 +76,27 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchSecJson(url) {
+async function queueSecRequest(loader) {
   const request = secRequestQueue.then(async () => {
     const delay = Math.max(0, nextSecRequestAt - Date.now());
     if (delay) await wait(delay);
     nextSecRequestAt = Date.now() + SEC_MIN_INTERVAL_MS;
-    return fetchJson(url, { headers: SEC_HEADERS });
+    return loader();
   });
   secRequestQueue = request.catch(() => undefined);
   return request;
+}
+
+async function fetchSecJson(url) {
+  return queueSecRequest(() => fetchJson(url, { headers: SEC_HEADERS }));
+}
+
+async function fetchSecText(url) {
+  return queueSecRequest(async () => {
+    const response = await fetch(url, { headers: { ...SEC_HEADERS, Accept: "application/xml,text/xml,text/html,*/*" }, signal: AbortSignal.timeout(15000) });
+    if (!response.ok) throw new Error(`SEC filing request failed (${response.status}).`);
+    return response.text();
+  });
 }
 
 async function tickerMap() {
@@ -110,6 +126,63 @@ async function fetchSecCompany(ticker) {
     fetchSecJson(`https://data.sec.gov/submissions/CIK${company.cik}.json`)
   ]);
   return { company, facts, submissions };
+}
+
+function xmlValue(block, tag) {
+  const match = String(block || "").match(new RegExp(`<${tag}[^>]*>\\s*(?:<value[^>]*>)?([^<]+)(?:</value>)?\\s*</${tag}>`, "i"));
+  return match ? match[1].trim().replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">") : null;
+}
+
+async function fetchRecentForm4Purchases(company, submissions, limit = 5) {
+  if (!company?.cik) return [];
+  const cutoff = Date.now() - (366 * 86400000);
+  const recent = submissions?.filings?.recent || {};
+  const forms = recent.form || [];
+  const filings = [];
+  for (let index = 0; index < forms.length && filings.length < limit; index += 1) {
+    if (!/^4(?:\/A)?$/.test(forms[index])) continue;
+    const accession = recent.accessionNumber?.[index];
+    const primaryDocument = recent.primaryDocument?.[index];
+    const filed = recent.filingDate?.[index] || null;
+    if (filed && Date.parse(filed) < cutoff) continue;
+    if (!accession || !primaryDocument) continue;
+    filings.push({
+      filed,
+      accession,
+      primaryDocument,
+      url: `https://www.sec.gov/Archives/edgar/data/${Number(company.cik)}/${accession.replaceAll("-", "")}/${primaryDocument}`
+    });
+  }
+
+  const settled = await Promise.allSettled(filings.map(async (filing) => ({ ...filing, xml: await fetchSecText(filing.url) })));
+  const purchases = [];
+  for (const result of settled) {
+    if (result.status !== "fulfilled") continue;
+    const { xml, ...filing } = result.value;
+    const ownerBlock = xml.match(/<reportingOwner>([\s\S]*?)<\/reportingOwner>/i)?.[1] || "";
+    const ownerName = xmlValue(ownerBlock, "rptOwnerName");
+    const relationship = xmlValue(ownerBlock, "officerTitle")
+      || (xmlValue(ownerBlock, "isDirector") === "1" ? "Director" : xmlValue(ownerBlock, "isOfficer") === "1" ? "Officer" : null);
+    const blocks = xml.match(/<nonDerivativeTransaction>[\s\S]*?<\/nonDerivativeTransaction>/gi) || [];
+    for (const block of blocks) {
+      if (xmlValue(block, "transactionCode") !== "P" || xmlValue(block, "transactionAcquiredDisposedCode") !== "A") continue;
+      const shares = Number(xmlValue(block, "transactionShares"));
+      const price = Number(xmlValue(block, "transactionPricePerShare"));
+      purchases.push({
+        name: ownerName,
+        relation: relationship,
+        date: xmlValue(block, "transactionDate") || filing.filed,
+        shares: finite(shares) ? shares : null,
+        price: finite(price) ? price : null,
+        value: finite(shares) && finite(price) ? shares * price : null,
+        sharesAfter: Number(xmlValue(block, "sharesOwnedFollowingTransaction")) || null,
+        security: xmlValue(block, "securityTitle") || "Common stock",
+        filingUrl: filing.url,
+        source: "SEC Form 4"
+      });
+    }
+  }
+  return purchases.sort((a, b) => String(b.date).localeCompare(String(a.date)));
 }
 
 function allConcepts(facts, tag) {
@@ -208,7 +281,7 @@ function latestInstant(facts, tags) {
 
 function extractFinancials(facts) {
   const series = {};
-  for (const key of ["revenue", "ocf", "capex", "intangibleCapex", "dna", "interestExpense", "sbc", "dilutedShares", "buybackCash", "buybackShares"]) {
+  for (const key of ["revenue", "ocf", "capex", "intangibleCapex", "dna", "interestExpense", "sbc", "dilutedShares", "buybackCash", "buybackShares", "dividendsPaid"]) {
     series[key] = bestAnnualSeries(facts, TAGS[key]);
   }
   const cash = latestInstant(facts, TAGS.cash);
@@ -241,4 +314,4 @@ async function fetchSecUniverse() {
   return valid;
 }
 
-module.exports = { fetchSecCompany, extractFinancials, fetchSecUniverse, TAGS };
+module.exports = { fetchSecCompany, extractFinancials, fetchSecUniverse, fetchRecentForm4Purchases, TAGS };

@@ -7,7 +7,7 @@ module.exports = async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "Use GET for /api/analyze." });
   try {
     const ticker = String(req.query?.ticker || "").trim().toUpperCase();
-    const report = await analyzeTicker(ticker, { price: req.query?.price });
+    const report = await analyzeTicker(ticker, { price: req.query?.price, includeDetail: true });
     setCacheHeaders(res, 60);
     return res.status(200).json(report);
   } catch (error) {

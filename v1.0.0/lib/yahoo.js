@@ -122,9 +122,12 @@ async function fetchYahooQuote(ticker) {
             exDividendDate: finite(raw(detail?.exDividendDate)) ? new Date(raw(detail.exDividendDate) * 1000).toISOString().slice(0, 10) : null,
             source: "Yahoo Finance summary"
           },
+          fiftyTwoWeekHigh: finite(raw(detail?.fiftyTwoWeekHigh)) ? raw(detail.fiftyTwoWeekHigh) : null,
+          fiftyTwoWeekLow: finite(raw(detail?.fiftyTwoWeekLow)) ? raw(detail.fiftyTwoWeekLow) : null,
           insiders: {
             period: netActivity.period || "12 months",
-            purchaseCount: directPurchases.length || (finite(buyCount) ? buyCount : 0),
+            purchaseCount: directPurchases.length,
+            reportedBuyCount: finite(buyCount) ? buyCount : null,
             saleCount: finite(sellCount) ? sellCount : null,
             netShares: finite(netShares) ? netShares : null,
             averagePurchasePrice: purchaseShares > 0 && purchaseValue > 0 ? purchaseValue / purchaseShares : null,
@@ -153,8 +156,8 @@ async function fetchYahooQuote(ticker) {
       const qData = await fetchJson(url, { headers: HEADERS });
       const q = qData?.quoteResponse?.result?.[0];
       if (q && finite(q.regularMarketPrice)) {
-        const fallbackYield = finite(q.dividendYield) ? q.dividendYield
-          : finite(q.trailingAnnualDividendYield) ? q.trailingAnnualDividendYield : null;
+        const fallbackYield = finite(q.trailingAnnualDividendYield) ? q.trailingAnnualDividendYield
+          : finite(q.dividendYield) ? q.dividendYield / 100 : null;
         return {
           price: q.regularMarketPrice,
           marketCap: finite(q.marketCap) ? q.marketCap : null,
@@ -179,6 +182,8 @@ async function fetchYahooQuote(ticker) {
             exDividendDate: finite(q.exDividendDate) ? new Date(q.exDividendDate * 1000).toISOString().slice(0, 10) : null,
             source: "Yahoo Finance quote"
           },
+          fiftyTwoWeekHigh: finite(q.fiftyTwoWeekHigh) ? q.fiftyTwoWeekHigh : null,
+          fiftyTwoWeekLow: finite(q.fiftyTwoWeekLow) ? q.fiftyTwoWeekLow : null,
           marketTime: q.regularMarketTime ? new Date(q.regularMarketTime * 1000).toISOString() : null,
           source: "Yahoo Finance quote"
         };
@@ -222,6 +227,7 @@ const FUNDAMENTAL_TYPES = [
   "annualDepreciationAndAmortization",
   "annualInterestExpense",
   "annualRepurchaseOfCapitalStock",
+  "annualCashDividendsPaid",
   "quarterlyCashCashEquivalentsAndShortTermInvestments",
   "quarterlyCashAndCashEquivalents",
   "quarterlyTotalDebt",
@@ -310,7 +316,8 @@ async function fetchYahooFinancials(ticker) {
     sbc: yahooSeries(byType, "annualStockBasedCompensation"),
     dilutedShares: yahooSeries(byType, "annualDilutedAverageShares"),
     buybackCash: yahooSeries(byType, "annualRepurchaseOfCapitalStock"),
-    buybackShares: empty("Unavailable")
+    buybackShares: empty("Unavailable"),
+    dividendsPaid: yahooSeries(byType, "annualCashDividendsPaid")
   };
   const cash = latestYahooFact(byType, ["quarterlyCashCashEquivalentsAndShortTermInvestments", "quarterlyCashAndCashEquivalents"]);
   const totalDebt = latestYahooFact(byType, ["quarterlyTotalDebt"]);
@@ -396,4 +403,16 @@ async function fetchExchangeRate(from, to) {
   throw error;
 }
 
-module.exports = { SOURCES, fetchYahooQuote, fetchYahooFinancials, fetchYahooUniverse, fetchExchangeRate };
+async function fetchYahooPriceHistory(ticker) {
+  const symbol = encodeURIComponent(ticker);
+  const data = await fetchJson(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=5y&interval=1mo&events=div`, { headers: HEADERS }, 12000);
+  const result = data?.chart?.result?.[0];
+  const timestamps = result?.timestamp || [];
+  const closes = result?.indicators?.adjclose?.[0]?.adjclose || result?.indicators?.quote?.[0]?.close || [];
+  return timestamps.map((timestamp, index) => ({
+    date: new Date(timestamp * 1000).toISOString().slice(0, 10),
+    close: finite(closes[index]) ? closes[index] : null
+  })).filter((item) => finite(item.close));
+}
+
+module.exports = { SOURCES, fetchYahooQuote, fetchYahooFinancials, fetchYahooUniverse, fetchExchangeRate, fetchYahooPriceHistory };

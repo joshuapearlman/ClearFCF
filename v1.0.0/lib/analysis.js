@@ -1,7 +1,7 @@
 "use strict";
 
-const { fetchSecCompany, extractFinancials } = require("./sec");
-const { fetchYahooQuote, fetchYahooFinancials, fetchExchangeRate } = require("./yahoo");
+const { fetchSecCompany, extractFinancials, fetchRecentForm4Purchases } = require("./sec");
+const { fetchYahooQuote, fetchYahooFinancials, fetchExchangeRate, fetchYahooPriceHistory } = require("./yahoo");
 const { finite, round, median, standardDeviation } = require("./utils");
 const { evaluateCandidate } = require("../public/screening");
 
@@ -50,6 +50,8 @@ function annualRows(extracted) {
     const buybackSharesRaw = valueForYear(extracted.series.buybackShares, year);
     const buybackCash = finite(buybackCashRaw) ? Math.abs(buybackCashRaw) : null;
     const buybackShares = finite(buybackSharesRaw) ? Math.abs(buybackSharesRaw) : null;
+    const dividendsPaidRaw = valueForYear(extracted.series.dividendsPaid, year);
+    const dividendsPaid = finite(dividendsPaidRaw) ? Math.abs(dividendsPaidRaw) : null;
 
     const fcf = finite(ocf) && finite(capex) ? ocf - capex : null;
     const fcfEconomic = finite(fcf) && finite(sbc) ? fcf - sbc : null;
@@ -60,6 +62,8 @@ function annualRows(extracted) {
       fcfEconomic,
       buybackCash,
       buybackShares,
+      dividendsPaid,
+      dividendsPerShare: finite(dividendsPaid) && finite(shares) && shares > 0 ? dividendsPaid / shares : null,
       fcfMargin: finite(fcf) && finite(revenue) && revenue > 0 ? fcf / revenue : null,
       fcfEconomicMargin: finite(fcfEconomic) && finite(revenue) && revenue > 0 ? fcfEconomic / revenue : null,
       sbcToRevenue: finite(sbc) && finite(revenue) && revenue > 0 ? sbc / revenue : null,
@@ -328,6 +332,92 @@ function computeQuality(rows, normalized, currentPrice = null) {
   };
 }
 
+function computeOwnerReturns(rows, normalized, marketCap, dividends = {}) {
+  const dividendRows = rows.filter((row) => finite(row.dividendsPerShare) && row.dividendsPerShare > 0);
+  const latest = rows[0] || {};
+  const latestDividendCash = finite(latest.dividendsPaid) ? latest.dividendsPaid
+    : finite(dividends.annualRate) && finite(latest.shares) ? dividends.annualRate * latest.shares : null;
+  const payoutRatio = finite(latestDividendCash) && finite(normalized.normalizedFcf) && normalized.normalizedFcf > 0
+    ? latestDividendCash / normalized.normalizedFcf : null;
+  const fiveYearRows = dividendRows.slice(0, 5);
+  const newest = fiveYearRows[0];
+  const oldest = fiveYearRows.at(-1);
+  const growthYears = newest && oldest ? newest.year - oldest.year : 0;
+  const fiveYearGrowth = growthYears > 0 && oldest.dividendsPerShare > 0
+    ? (newest.dividendsPerShare / oldest.dividendsPerShare) ** (1 / growthYears) - 1 : null;
+  let yearsWithoutCut = dividendRows.length ? 1 : 0;
+  for (let index = 0; index < dividendRows.length - 1; index += 1) {
+    if (dividendRows[index].dividendsPerShare + 1e-9 < dividendRows[index + 1].dividendsPerShare * 0.98) break;
+    yearsWithoutCut += 1;
+  }
+  const latestCut = dividendRows.length >= 2
+    ? dividendRows[0].dividendsPerShare < dividendRows[1].dividendsPerShare * 0.98 : false;
+  const coverage = !finite(dividends.currentYield) || dividends.currentYield <= 0 ? "No dividend"
+    : !finite(payoutRatio) ? "Coverage unavailable"
+      : payoutRatio <= 0.60 ? "Strong coverage"
+        : payoutRatio <= 0.85 ? "Covered"
+          : payoutRatio <= 1 ? "Stretched" : "Not covered by nFCF";
+
+  const buybackCashYield = finite(latest.buybackCash) && finite(marketCap) && marketCap > 0 ? latest.buybackCash / marketCap : null;
+  const sbcYield = finite(latest.sbc) && finite(marketCap) && marketCap > 0 ? latest.sbc / marketCap : null;
+  const dividendCashYield = finite(latestDividendCash) && finite(marketCap) && marketCap > 0
+    ? latestDividendCash / marketCap : dividends.currentYield;
+  const shareholderYield = finite(dividendCashYield) && finite(buybackCashYield) && finite(sbcYield)
+    ? dividendCashYield + buybackCashYield - sbcYield : null;
+  const prior = rows.find((row, index) => index > 0 && finite(row.shares) && row.shares > 0);
+  const netBuybackYield = finite(latest.shares) && finite(prior?.shares) && prior.shares > 0
+    ? (prior.shares - latest.shares) / prior.shares : null;
+
+  return {
+    dividendSafety: {
+      payoutRatio,
+      fiveYearGrowth,
+      yearsWithoutCut,
+      latestCut,
+      coverage,
+      highYieldRisk: finite(dividends.currentYield) && dividends.currentYield >= 0.05 && finite(payoutRatio) && payoutRatio > 0.85,
+      latestDividendCash,
+      historyYears: dividendRows.length
+    },
+    shareholderYield: {
+      dividendCashYield,
+      buybackCashYield,
+      sbcYield,
+      netBuybackYield,
+      total: shareholderYield
+    }
+  };
+}
+
+function computeValuationHistory(rows, priceHistory, valuation, quote) {
+  const observations = [];
+  for (const row of rows) {
+    if (!finite(row.fcf) || row.fcf <= 0 || !finite(row.shares) || row.shares <= 0) continue;
+    const prices = priceHistory.filter((item) => Number(item.date.slice(0, 4)) === row.year && finite(item.close));
+    const price = prices.at(-1)?.close;
+    if (!finite(price)) continue;
+    observations.push({ year: row.year, price, priceToFcf: price * row.shares / row.fcf });
+  }
+  const currentReportedMultiple = finite(valuation.marketCap) && finite(rows[0]?.fcf) && rows[0].fcf > 0
+    ? valuation.marketCap / rows[0].fcf : null;
+  const multiples = observations.map((item) => item.priceToFcf).filter(finite);
+  const percentile = finite(currentReportedMultiple) && multiples.length
+    ? multiples.filter((value) => value <= currentReportedMultiple).length / multiples.length : null;
+  const historicalMedian = median(multiples);
+  const drawdownFromHigh = finite(quote?.fiftyTwoWeekHigh) && quote.fiftyTwoWeekHigh > 0 && finite(valuation.price)
+    ? valuation.price / quote.fiftyTwoWeekHigh - 1 : null;
+  return {
+    observations,
+    currentReportedMultiple,
+    historicalMedian,
+    multiplePercentile: percentile,
+    context: !finite(percentile) ? "History unavailable" : percentile <= 0.25 ? "Cheap vs. history" : percentile >= 0.75 ? "Expensive vs. history" : "Near historical range",
+    drawdownFromHigh,
+    fiftyTwoWeekHigh: finite(quote?.fiftyTwoWeekHigh) ? quote.fiftyTwoWeekHigh : null,
+    fiftyTwoWeekLow: finite(quote?.fiftyTwoWeekLow) ? quote.fiftyTwoWeekLow : null
+  };
+}
+
 function latestFiling(submissions) {
   const recent = submissions?.filings?.recent || {};
   const forms = recent.form || [];
@@ -415,7 +505,9 @@ async function analyzeTicker(rawTicker, options = {}) {
       dna: finite(r.dna) ? r.dna * fxRate : null,
       interest: finite(r.interest) ? r.interest * fxRate : null,
       sbc: finite(r.sbc) ? r.sbc * fxRate : null,
-      buybackCash: finite(r.buybackCash) ? r.buybackCash * fxRate : null
+      buybackCash: finite(r.buybackCash) ? r.buybackCash * fxRate : null,
+      dividendsPaid: finite(r.dividendsPaid) ? r.dividendsPaid * fxRate : null,
+      dividendsPerShare: finite(r.dividendsPerShare) ? r.dividendsPerShare * fxRate : null
     }));
     normalized = normalize(rows);
     normalized5y = normalize(rows, 5);
@@ -491,6 +583,17 @@ async function analyzeTicker(rawTicker, options = {}) {
     shortDebtToCash: finite(cash) && cash > 0 && finite(shortDebt) && shortDebt > 0 ? shortDebt / cash : null
   };
 
+  let secInsiderPurchases = [];
+  let priceHistory = [];
+  if (options.includeDetail === true) {
+    const detailAttempts = await Promise.allSettled([
+      secAttempt.status === "fulfilled" ? fetchRecentForm4Purchases(company, submissions, 6) : Promise.resolve([]),
+      fetchYahooPriceHistory(ticker)
+    ]);
+    if (detailAttempts[0].status === "fulfilled") secInsiderPurchases = detailAttempts[0].value;
+    if (detailAttempts[1].status === "fulfilled") priceHistory = detailAttempts[1].value;
+  }
+
   const dividends = {
     currentYield: finite(quoteResult?.dividends?.currentYield) ? quoteResult.dividends.currentYield : null,
     annualRate: finite(quoteResult?.dividends?.annualRate) ? quoteResult.dividends.annualRate : null,
@@ -499,29 +602,43 @@ async function analyzeTicker(rawTicker, options = {}) {
     source: quoteResult?.dividends?.source || "Unavailable"
   };
   const quotedInsiders = quoteResult?.insiders || {};
+  const authoritativePurchases = secInsiderPurchases.length ? secInsiderPurchases : (quotedInsiders.purchases || []);
   const insiderDataAvailable = Boolean(quotedInsiders.source) || finite(quotedInsiders.saleCount) || finite(quotedInsiders.netShares);
-  const insiderPurchaseCount = finite(quotedInsiders.purchaseCount) ? quotedInsiders.purchaseCount : 0;
-  const hasInsiderBuying = insiderPurchaseCount > 0 || (finite(quotedInsiders.netShares) && quotedInsiders.netShares > 0);
-  const purchasePriceComparable = finite(quotedInsiders.averagePurchasePrice) && finite(price) && price > 0;
-  const tradingNearInsiderBuys = purchasePriceComparable ? price <= quotedInsiders.averagePurchasePrice * 1.10 : null;
+  const insiderPurchaseCount = secInsiderPurchases.length || (finite(quotedInsiders.purchaseCount) ? quotedInsiders.purchaseCount : 0);
+  const hasInsiderBuying = insiderPurchaseCount > 0;
+  const totalPurchaseShares = authoritativePurchases.reduce((sum, item) => sum + (finite(item.shares) ? item.shares : 0), 0);
+  const totalPurchaseValue = authoritativePurchases.reduce((sum, item) => sum + (finite(item.value) ? item.value : 0), 0);
+  const averagePurchasePrice = totalPurchaseShares > 0 && totalPurchaseValue > 0
+    ? totalPurchaseValue / totalPurchaseShares : quotedInsiders.averagePurchasePrice;
+  const buyers = [...new Set(authoritativePurchases.map((item) => item.name).filter(Boolean))];
+  const clusterBuying = buyers.length >= 2;
+  const purchasePriceComparable = finite(averagePurchasePrice) && finite(price) && price > 0;
+  const tradingNearInsiderBuys = purchasePriceComparable ? price <= averagePurchasePrice * 1.10 : null;
   const inexpensiveOnFcf = finite(valuation.priceToNfcf) && valuation.priceToNfcf > 0 && valuation.priceToNfcf <= 15;
   const insiders = {
     period: quotedInsiders.period || "12 months",
     purchaseCount: insiderPurchaseCount,
     saleCount: finite(quotedInsiders.saleCount) ? quotedInsiders.saleCount : null,
     netShares: finite(quotedInsiders.netShares) ? quotedInsiders.netShares : null,
-    averagePurchasePrice: finite(quotedInsiders.averagePurchasePrice) ? quotedInsiders.averagePurchasePrice : null,
-    purchases: Array.isArray(quotedInsiders.purchases) ? quotedInsiders.purchases : [],
+    averagePurchasePrice: finite(averagePurchasePrice) ? averagePurchasePrice : null,
+    purchases: authoritativePurchases,
+    buyers,
+    clusterBuying,
+    largestPurchaseValue: authoritativePurchases.reduce((max, item) => Math.max(max, finite(item.value) ? item.value : 0), 0) || null,
+    latestPurchaseDate: authoritativePurchases.map((item) => item.date).filter(Boolean).sort().at(-1) || null,
     hasRecentBuying: hasInsiderBuying,
     tradingNearInsiderBuys,
     valueAligned: hasInsiderBuying && inexpensiveOnFcf && tradingNearInsiderBuys !== false,
-    signal: !insiderDataAvailable ? "Unavailable"
+    signal: !insiderDataAvailable && !secInsiderPurchases.length ? "Unavailable"
       : !hasInsiderBuying ? "No recent buying found"
-      : inexpensiveOnFcf && tradingNearInsiderBuys !== false ? "Buying + inexpensive FCF"
+      : clusterBuying && inexpensiveOnFcf && tradingNearInsiderBuys !== false ? "Cluster buying + inexpensive FCF"
+        : inexpensiveOnFcf && tradingNearInsiderBuys !== false ? "Buying + inexpensive FCF"
         : "Recent insider buying",
-    source: quotedInsiders.source || "Unavailable",
+    source: secInsiderPurchases.length ? "SEC Form 4" : quotedInsiders.source || "Unavailable",
     caveat: "A purchase can align with a low valuation, but the filing does not disclose that cheapness was the insider's motive."
   };
+  const ownerReturns = computeOwnerReturns(rows, normalized, marketCap, dividends);
+  const valuationHistory = computeValuationHistory(rows, priceHistory, valuation, quoteResult);
 
   const warnings = [];
   if (financialSource !== "SEC Company Facts") warnings.push(`SEC filing data was unavailable (${secFallbackReason}); analysis uses Yahoo annual fundamentals and should be verified against the original filing.`);
@@ -534,6 +651,8 @@ async function analyzeTicker(rawTicker, options = {}) {
   if (shareSelection.inconsistent && !suppliedMarketCap) warnings.push(`SEC instant shares (${round(shareSelection.instant)}) differ materially from annual diluted shares (${round(shareSelection.annual)}); valuation uses the annual diluted figure.`);
   if (finite(valuation.fcfYield) && valuation.fcfYield > 0.50) warnings.push("Normalized FCF yield exceeds 50%; verify market capitalization and cash-flow facts before relying on valuation.");
   if (finite(valuation.fcfYield) && valuation.fcfYield > 0.25) warnings.push("Elevated FCF yield (>25%): deep value opportunity or potential distress; inspect balance sheet and business durability.");
+  if (ownerReturns.dividendSafety.highYieldRisk) warnings.push("High dividend yield is paired with a stretched normalized-FCF payout ratio; verify dividend sustainability.");
+  if (ownerReturns.dividendSafety.latestCut) warnings.push("The latest annual dividend per share is lower than the prior annual period.");
   if (!finite(cash) || !finite(debt)) warnings.push("Cash or debt data is incomplete; the company cannot qualify automatically.");
   warnings.push(...balanceSheet.notes);
   
@@ -607,7 +726,10 @@ async function analyzeTicker(rawTicker, options = {}) {
     quality,
     valuation,
     dividends,
+    dividendSafety: ownerReturns.dividendSafety,
+    shareholderYield: ownerReturns.shareholderYield,
     insiders,
+    valuationHistory,
     evidenceConfidence,
     warnings,
     filing: filing ? { ...filing, url: filingUrl(company.cik, filing) } : null,
@@ -634,6 +756,8 @@ async function analyzeTicker(rawTicker, options = {}) {
   report.evaluation = evaluation;
   report.status = evaluation.status;
   report.passesDefaultIdeaFilter = evaluation.status === "Idea";
+  report.primaryReason = evaluation.exclusions[0] || evaluation.failures[0] || evaluation.unknowns[0] || "All active qualification checks passed";
+  report.decisionSummary = decisionSummary(report);
   return report;
 }
 
@@ -641,6 +765,17 @@ function compactStr(val) {
   if (Math.abs(val) >= 1e9) return (val / 1e9).toFixed(1) + "B";
   if (Math.abs(val) >= 1e6) return (val / 1e6).toFixed(1) + "M";
   return Math.round(val).toLocaleString();
+}
+
+function decisionSummary(report) {
+  const parts = [];
+  if (finite(report.valuation?.priceToNfcf)) parts.push(`${round(report.valuation.priceToNfcf, 1)}x normalized FCF`);
+  if (finite(report.valuation?.netDebtToNfcf) && report.valuation.netDebtToNfcf < 0) parts.push("net cash");
+  if (finite(report.dividends?.currentYield) && report.dividends.currentYield > 0) parts.push(`${round(report.dividends.currentYield * 100, 1)}% dividend yield`);
+  if (finite(report.quality?.positiveFcfRatio)) parts.push(`positive FCF in ${round(report.quality.positiveFcfRatio * 100, 0)}% of usable years`);
+  if (report.insiders?.clusterBuying) parts.push("recent cluster insider buying");
+  else if (report.insiders?.hasRecentBuying) parts.push("recent insider buying");
+  return `${report.status}: ${parts.slice(0, 4).join(", ") || report.primaryReason}.`;
 }
 
 function summary(report) {
@@ -669,6 +804,23 @@ function summary(report) {
     insiderAveragePurchasePrice: round(report.insiders?.averagePurchasePrice, 2),
     insiderValueAligned: report.insiders?.valueAligned === true,
     insiderSignal: report.insiders?.signal || "Unavailable",
+    insiderClusterBuying: report.insiders?.clusterBuying === true,
+    latestInsiderPurchaseDate: report.insiders?.latestPurchaseDate || null,
+    dividendPayoutRatio: round(report.dividendSafety?.payoutRatio, 4),
+    dividendGrowth5y: round(report.dividendSafety?.fiveYearGrowth, 4),
+    dividendYearsWithoutCut: report.dividendSafety?.yearsWithoutCut ?? 0,
+    dividendCoverage: report.dividendSafety?.coverage || "Unavailable",
+    shareholderYield: round(report.shareholderYield?.total, 4),
+    buybackCashYield: round(report.shareholderYield?.buybackCashYield, 4),
+    sbcYield: round(report.shareholderYield?.sbcYield, 4),
+    netBuybackYield: round(report.shareholderYield?.netBuybackYield, 4),
+    valuationHistoryContext: report.valuationHistory?.context || "History unavailable",
+    valuationMultiplePercentile: round(report.valuationHistory?.multiplePercentile, 4),
+    drawdownFromHigh: round(report.valuationHistory?.drawdownFromHigh, 4),
+    marketDataAsOf: report.quote?.marketTime || null,
+    financialPeriodEnd: report.rows?.[0]?.evidence?.revenue?.periodEnd || String(report.rows?.[0]?.year || ""),
+    primaryReason: report.primaryReason,
+    decisionSummary: report.decisionSummary,
     latestRevenue: round(report.normalized.latestRevenue),
     latestFcf: round(report.normalized.latestReportedFcf),
     averageAnnualFcf: round(report.normalized.averageAnnualFcf),
@@ -740,4 +892,4 @@ async function analyzeBatch(tickers, options = {}) {
   return { results, reports, failures };
 }
 
-module.exports = { annualRows, normalize, computeQuality, selectValuationShares, debtValue, reconcileBalanceSheet, analyzeTicker, analyzeBatch, summary };
+module.exports = { annualRows, normalize, computeQuality, computeOwnerReturns, computeValuationHistory, selectValuationShares, debtValue, reconcileBalanceSheet, analyzeTicker, analyzeBatch, summary };

@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { normalize, computeQuality, selectValuationShares } = require("../lib/analysis");
+const { normalize, computeQuality, computeOwnerReturns, computeValuationHistory, selectValuationShares } = require("../lib/analysis");
 
 function row(year, revenue, fcf, shares = 100, sbc = 5, dna = 20) {
   return {
@@ -166,4 +166,32 @@ test("multi-window normalization computes distinct 5-year and full-history metri
   assert.equal(fiveYearNorm.usableYears, 5);
   assert.equal(fiveYearNorm.simpleAverageMargin, 0.20);
   assert.ok(fiveYearNorm.normalizedFcf > fullNorm.normalizedFcf);
+});
+
+test("dividend safety and shareholder yield use normalized FCF and owner cash flows", () => {
+  const rows = [
+    { year: 2025, fcf: 100, shares: 100, dividendsPaid: 30, dividendsPerShare: 0.30, buybackCash: 20, sbc: 5 },
+    { year: 2024, fcf: 90, shares: 102, dividendsPaid: 25.5, dividendsPerShare: 0.25, buybackCash: 10, sbc: 4 }
+  ];
+  const result = computeOwnerReturns(rows, { normalizedFcf: 100 }, 1000, { currentYield: 0.03 });
+  assert.equal(result.dividendSafety.payoutRatio, 0.30);
+  assert.equal(result.dividendSafety.coverage, "Strong coverage");
+  assert.equal(result.dividendSafety.yearsWithoutCut, 2);
+  assert.ok(Math.abs(result.shareholderYield.total - 0.045) < 1e-12);
+  assert.ok(result.shareholderYield.netBuybackYield > 0);
+});
+
+test("valuation history reports percentile and drawdown without calling it intrinsic value", () => {
+  const rows = [
+    { year: 2025, fcf: 10, shares: 10 },
+    { year: 2024, fcf: 10, shares: 10 }
+  ];
+  const history = [
+    { date: "2024-12-31", close: 10 },
+    { date: "2025-12-31", close: 12 }
+  ];
+  const result = computeValuationHistory(rows, history, { marketCap: 80, price: 8 }, { fiftyTwoWeekHigh: 10, fiftyTwoWeekLow: 6 });
+  assert.equal(result.context, "Cheap vs. history");
+  assert.equal(result.multiplePercentile, 0);
+  assert.ok(Math.abs(result.drawdownFromHigh + 0.2) < 1e-12);
 });

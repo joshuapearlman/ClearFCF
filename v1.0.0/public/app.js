@@ -77,6 +77,22 @@ function evaluateReportStatus(row, crit) {
   return screening.evaluateCandidate(row, crit).status;
 }
 
+function decisionText(row, evaluation) {
+  const selected = evaluation?.selected || screening.selectedMetrics(row, state.criteria);
+  const parts = [];
+  if (typeof selected.priceToNfcf === "number") parts.push(`${selected.priceToNfcf.toFixed(1)}x normalized FCF`);
+  const netDebt = row.netDebtToNfcf ?? row.valuation?.netDebtToNfcf;
+  if (typeof netDebt === "number" && netDebt < 0) parts.push("net cash");
+  const dividendYield = row.dividendYield ?? row.dividends?.currentYield;
+  if (typeof dividendYield === "number" && dividendYield > 0) parts.push(`${(dividendYield * 100).toFixed(1)}% dividend yield`);
+  const positiveRatio = row.positiveFcfRatio ?? row.quality?.positiveFcfRatio;
+  if (typeof positiveRatio === "number") parts.push(`positive FCF in ${Math.round(positiveRatio * 100)}% of years`);
+  if (row.insiderClusterBuying || row.insiders?.clusterBuying) parts.push("cluster insider buying");
+  else if (row.insiderBuying || row.insiders?.hasRecentBuying) parts.push("recent insider buying");
+  const reason = evaluation?.exclusions?.[0] || evaluation?.failures?.[0] || evaluation?.unknowns?.[0] || "all active qualification checks passed";
+  return `${evaluation?.status || row.status}: ${parts.slice(0, 4).join(", ") || reason}.`;
+}
+
 const STORAGE_KEY = "clear-fcf-auto-v3";
 const REVIEWED_KEY = "clear-fcf-reviewed-v2";
 
@@ -204,16 +220,22 @@ document.querySelectorAll(".nav-button").forEach((button) => {
   button.addEventListener("click", () => switchView(button.dataset.view));
 });
 
-function tableHtml(results, title) {
-  if (!results.length) return `<div class="results-shell"><div class="empty-state compact-empty filtered-empty">
+function tableHtml(results, title, statusFilter = "All", counts = {}) {
+  const tabs = `<div class="status-tabs" role="tablist" aria-label="Result status">
+    ${["All", "Idea", "Review", "Excluded"].map((status) => `<button type="button" class="status-tab ${statusFilter === status ? "active" : ""}" data-status-filter="${status}">${status} <span>${counts[status] || 0}</span></button>`).join("")}
+  </div>`;
+  if (!results.length) return `<div class="results-shell">
+    <div class="results-head"><h2>${escapeHtml(title)} <small>(${counts.All || 0})</small></h2>${tabs}</div>
+    <div class="empty-state compact-empty filtered-empty">
     <div class="empty-mark" aria-hidden="true"><span></span><span></span><span></span></div>
-    <h3>No candidates match the active criteria</h3>
-    <p>Try clearing a quick filter or widening the screening tolerances. Examined companies remain saved.</p>
+    <h3>No companies match this view</h3>
+    <p>Choose another status tab, clear a display filter, or widen the qualification criteria.</p>
   </div></div>`;
   return `<div class="results-shell ${state.showMoreMetrics ? "show-more" : ""}">
     <div class="results-head">
       <h2>${escapeHtml(title)} <small>(${results.length})</small></h2>
       <div class="results-tools">
+        ${tabs}
         <button class="metrics-toggle" type="button" data-more-metrics aria-expanded="${state.showMoreMetrics}">${state.showMoreMetrics ? "Fewer metrics" : "More metrics"}</button>
         <button class="export" type="button">Export CSV</button>
       </div>
@@ -233,6 +255,7 @@ function tableHtml(results, title) {
             <th class="sortable" data-sort="fcfYield">FCF yield</th>
             <th class="sortable" data-sort="dividendYield">Dividend yield</th>
             <th class="sortable optional-metric" data-sort="fiveYearDividendYield">5Y div. avg</th>
+            <th class="sortable optional-metric" data-sort="shareholderYield">Shareholder yield</th>
             <th class="sortable" data-sort="insiderSignal">Insiders</th>
             <th class="sortable optional-metric" data-sort="economicFcfYield">Econ yield</th>
             <th class="sortable optional-metric" data-sort="fcfTrajectory">FCF Trend</th>
@@ -254,6 +277,7 @@ function tableHtml(results, title) {
               ${row.buybackRating === 'Accretive' ? '<span class="badge badge-blue" title="Historical buybacks executed at a discount">Accretive Buyback</span>' : ''}
               ${row.insiderValueAligned ? '<span class="badge badge-blue" title="Recent disclosed insider buying overlaps with an inexpensive P/nFCF; motive is not known">Insider + Value</span>' : row.insiderBuying ? '<span class="badge badge-green" title="Recent disclosed insider purchase activity">Insider Buying</span>' : ''}
               ${row.latestSbcToFcf && row.latestSbcToFcf > 0.25 ? '<span class="badge badge-amber" title="SBC absorbs >25% of FCF">High SBC</span>' : ''}
+              <span class="result-summary" title="${escapeHtml(row.decisionSummary || '')}">${escapeHtml(row.decisionSummary || row.primaryReason || '')}</span>
             </td>
             <td class="col-status" title="${escapeHtml([...(row.evaluation?.exclusions || []), ...(row.evaluation?.failures || []), ...(row.evaluation?.unknowns || [])].join("\n"))}"><span class="badge ${String(row.status).toLowerCase()}">${escapeHtml(row.status)}</span></td>
             <td>${compact(row.price, true)}</td>
@@ -262,9 +286,10 @@ function tableHtml(results, title) {
             <td class="optional-metric">${multiple(row.priceToEconomicNfcf)}</td>
             <td class="optional-metric">${multiple(row.evToUnleveredNfcf)}</td>
             <td>${percent(row.fcfYield)}</td>
-            <td title="Current indicated or trailing annual dividend yield">${percent(row.dividendYield)}</td>
+            <td title="${escapeHtml(`Current indicated or trailing annual dividend yield. Coverage: ${row.dividendCoverage || 'Unavailable'}. Market data: ${row.marketDataAsOf || 'date unavailable'}`)}">${percent(row.dividendYield)}${row.dividendCoverage && row.dividendCoverage !== 'No dividend' ? `<small class="cell-note">${escapeHtml(row.dividendCoverage)}</small>` : ''}</td>
             <td class="optional-metric" title="Yahoo Finance five-year average dividend yield">${percent(row.fiveYearDividendYield)}</td>
-            <td title="Purchase activity is evidence of buying, not proof the insider considered the shares cheap"><span class="badge ${row.insiderValueAligned ? 'badge-blue' : row.insiderBuying ? 'badge-green' : ''}">${escapeHtml(row.insiderSignal || 'Unavailable')}</span></td>
+            <td class="optional-metric" title="Dividends plus gross buybacks less SBC, divided by market cap">${percent(row.shareholderYield)}</td>
+            <td title="Purchase activity is evidence of buying, not proof the insider considered the shares cheap"><span class="badge ${row.insiderValueAligned ? 'badge-blue' : row.insiderBuying ? 'badge-green' : ''}">${escapeHtml(row.insiderSignal || 'Unavailable')}</span>${row.latestInsiderPurchaseDate ? `<small class="cell-note">Latest ${escapeHtml(row.latestInsiderPurchaseDate)}</small>` : ''}</td>
             <td class="optional-metric">${percent(row.economicFcfYield)}</td>
             <td class="optional-metric"><span class="badge ${row.fcfTrajectory === 'Expanding' ? 'badge-green' : row.fcfTrajectory === 'Deteriorating' ? 'badge-amber' : ''}">${escapeHtml(row.fcfTrajectory || 'Stable')}</span></td>
             <td class="optional-metric"><span class="badge ${row.buybackRating === 'Accretive' ? 'badge-green' : row.buybackRating === 'Value Destructive' ? 'badge-amber' : ''}">${escapeHtml(row.buybackRating || 'N/A')}</span></td>
@@ -317,7 +342,11 @@ function attachTableEvents(container, results) {
     });
   });
 
-  container.querySelector(".export")?.addEventListener("click", () => exportCsv(applyFilterAndSort(results)));
+  container.querySelector(".export")?.addEventListener("click", () => exportCsv(applyFilterAndSort(results, container._statusFilter || "All")));
+  container.querySelectorAll("[data-status-filter]").forEach((button) => button.addEventListener("click", () => {
+    container._statusFilter = button.dataset.statusFilter;
+    renderTable(container, container._rawResults || results, container._rawTitle || "Results");
+  }));
   container.querySelector("[data-more-metrics]")?.addEventListener("click", (event) => {
     state.showMoreMetrics = !state.showMoreMetrics;
     document.querySelectorAll(".results-shell").forEach((shell) => shell.classList.toggle("show-more", state.showMoreMetrics));
@@ -328,7 +357,7 @@ function attachTableEvents(container, results) {
   });
 }
 
-function applyFilterAndSort(results) {
+function applyFilterAndSort(results, statusFilter = "All") {
   let list = [...results];
   const crit = state.criteria;
 
@@ -340,34 +369,13 @@ function applyFilterAndSort(results) {
       ...evaluation.selected,
       status: evaluation.status,
       evaluation,
+      primaryReason: evaluation.exclusions[0] || evaluation.failures[0] || evaluation.unknowns[0] || "All active qualification checks passed",
+      decisionSummary: decisionText(r, evaluation),
       passesDefaultIdeaFilter: evaluation.status === "Idea"
     };
   });
 
-  // Filter based on active criteria thresholds
-  list = list.filter((r) => {
-    const mc = Number(r.marketCap ?? r.valuation?.marketCap ?? 0);
-    if (crit.minMarketCap && mc < crit.minMarketCap) return false;
-    const p = Number(r.priceToNfcf ?? r.valuation?.priceToNfcf);
-    const maxP = Number(crit.maxMultiple ?? 15);
-    if (Number.isFinite(p) && p > maxP) return false;
-
-    if (Number.isFinite(crit.maxEvMultiple)) {
-      const ev = Number(r.evToUnleveredNfcf ?? r.valuation?.evToUnleveredNfcf);
-      if (!Number.isFinite(ev) || ev > crit.maxEvMultiple) return false;
-    }
-
-    const sbc = Number(r.latestSbcToFcf ?? r.quality?.latestSbcToFcf);
-    if (Number.isFinite(sbc) && sbc > crit.maxSbc) return false;
-
-    const nd = Number(r.netDebtToNfcf ?? r.valuation?.netDebtToNfcf);
-    if (Number.isFinite(nd) && nd > crit.maxDebt) return false;
-
-    const yrs = Number(r.usableYears ?? r.normalized?.usableYears ?? 0);
-    if (yrs < crit.minYears) return false;
-
-    return true;
-  });
+  if (statusFilter !== "All") list = list.filter((row) => row.status === statusFilter);
 
   // 2. Quick Filter Pills
   if (state.activeFilters.has('net-cash')) {
@@ -409,18 +417,22 @@ function applyFilterAndSort(results) {
   }
   return list;
 }
-function renderTable(container, results, title) {
+function renderTable(container, results, title, defaultStatus = "All") {
   const isFirstRender = !container.querySelector(".results-shell");
   container._rawResults = results;
   container._rawTitle = title;
-  const filtered = applyFilterAndSort(results);
-  container.innerHTML = tableHtml(filtered, title);
+  if (!container._statusFilter) container._statusFilter = defaultStatus;
+  const evaluated = results.map((row) => ({ ...row, status: screening.evaluateCandidate(row, state.criteria).status }));
+  const counts = { All: evaluated.length, Idea: 0, Review: 0, Excluded: 0 };
+  evaluated.forEach((row) => { if (counts[row.status] !== undefined) counts[row.status] += 1; });
+  const filtered = applyFilterAndSort(results, container._statusFilter);
+  container.innerHTML = tableHtml(filtered, title, container._statusFilter, counts);
   if (isFirstRender) container.querySelector(".results-shell")?.classList.add("reveal");
   attachTableEvents(container, results);
 }
 
 function exportCsv(results) {
-  const fields = ["ticker", "companyName", "status", "price", "marketCap", "priceToNfcf", "priceToEconomicNfcf", "evToUnleveredNfcf", "fcfYield", "dividendYield", "fiveYearDividendYield", "dividendRate", "exDividendDate", "insiderBuying", "insiderPurchaseCount", "insiderNetShares", "insiderAveragePurchasePrice", "insiderValueAligned", "insiderSignal", "economicFcfYield", "fcfTrajectory", "buybackRating", "buybackPrice", "capexToDnaRatio", "usableYears", "netDebtToNfcf", "shortDebt", "cash", "shareChange", "latestSbcToFcf"];
+  const fields = ["ticker", "companyName", "status", "decisionSummary", "primaryReason", "price", "marketCap", "priceToNfcf", "priceToEconomicNfcf", "evToUnleveredNfcf", "fcfYield", "dividendYield", "fiveYearDividendYield", "dividendPayoutRatio", "dividendGrowth5y", "dividendYearsWithoutCut", "dividendCoverage", "shareholderYield", "buybackCashYield", "sbcYield", "netBuybackYield", "dividendRate", "exDividendDate", "insiderBuying", "insiderPurchaseCount", "insiderNetShares", "insiderAveragePurchasePrice", "insiderClusterBuying", "insiderValueAligned", "insiderSignal", "latestInsiderPurchaseDate", "valuationHistoryContext", "valuationMultiplePercentile", "drawdownFromHigh", "marketDataAsOf", "financialPeriodEnd", "economicFcfYield", "fcfTrajectory", "buybackRating", "buybackPrice", "capexToDnaRatio", "usableYears", "netDebtToNfcf", "shortDebt", "cash", "shareChange", "latestSbcToFcf"];
   const quote = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
   const csv = [fields.join(","), ...results.map((row) => fields.map((key) => quote(row[key])).join(","))].join("\n");
   const link = document.createElement("a");
@@ -580,6 +592,43 @@ function renderConcernGroups(report, evaluation) {
   </section>`).join("")}</div>`;
 }
 
+function renderOwnerReturns(report) {
+  const safety = report.dividendSafety || {};
+  const returns = report.shareholderYield || {};
+  const history = report.valuationHistory || {};
+  return `<div class="report-card report-detail">
+    <div class="waterfall-header"><div><h3>Owner Returns & Dividend Safety</h3><p class="muted">Cash returned to owners, adjusted for repurchases and stock compensation</p></div></div>
+    <div class="report-grid" style="margin-top:12px;">
+      <div class="metric"><span>Dividend coverage</span><strong class="${safety.highYieldRisk ? 'badge-amber' : ''}">${escapeHtml(safety.coverage || 'Unavailable')}</strong><small>${percent(safety.payoutRatio)} of normalized FCF</small></div>
+      <div class="metric"><span>5Y dividend growth</span><strong>${percent(safety.fiveYearGrowth)}</strong><small>${safety.yearsWithoutCut || 0} annual periods without a cut</small></div>
+      <div class="metric"><span>Shareholder yield</span><strong>${percent(returns.total)}</strong><small>Dividend + gross buybacks − SBC</small></div>
+      <div class="metric"><span>Yield components</span><strong>${percent(returns.dividendCashYield)} / ${percent(returns.buybackCashYield)} / −${percent(returns.sbcYield)}</strong><small>Dividend / buyback / SBC yields</small></div>
+      <div class="metric"><span>Valuation history</span><strong>${escapeHtml(history.context || 'History unavailable')}</strong><small>${history.multiplePercentile == null ? 'Five-year price history unavailable' : `${(history.multiplePercentile * 100).toFixed(0)}th percentile reported P/FCF`}</small></div>
+      <div class="metric"><span>52-week drawdown</span><strong>${percent(history.drawdownFromHigh)}</strong><small>High: ${compact(history.fiftyTwoWeekHigh, true)} • Low: ${compact(history.fiftyTwoWeekLow, true)}</small></div>
+    </div>
+  </div>`;
+}
+
+function renderInsiderEvidence(report) {
+  const insider = report.insiders || {};
+  const rows = insider.purchases || [];
+  return `<div class="report-card report-detail">
+    <div class="waterfall-header"><div><h3>Insider Purchase Evidence</h3><p class="muted">${escapeHtml(insider.source || 'Source unavailable')} • ${escapeHtml(insider.signal || 'Unavailable')}</p></div>${insider.clusterBuying ? '<span class="badge badge-blue">Cluster buying</span>' : ''}</div>
+    ${rows.length ? `<div class="table-scroll"><table class="compact-evidence-table"><thead><tr><th>Date</th><th>Buyer</th><th>Role</th><th>Shares</th><th>Price</th><th>Value</th><th>Ownership after</th><th>Filing</th></tr></thead><tbody>${rows.map((item) => `<tr>
+      <td>${escapeHtml(item.date || '—')}</td><td>${escapeHtml(item.name || 'Unknown')}</td><td>${escapeHtml(item.relation || '—')}</td><td>${compact(item.shares)}</td><td>${compact(item.price, true)}</td><td>${compact(item.value, true)}</td><td>${compact(item.sharesAfter)}</td><td>${item.filingUrl ? `<a class="source-link" href="${escapeHtml(item.filingUrl)}" target="_blank" rel="noopener">SEC Form 4 ↗</a>` : '—'}</td>
+    </tr>`).join('')}</tbody></table></div>` : '<p class="muted">No qualifying open-market purchase records were available in the recent transaction feed.</p>'}
+    <p class="evidence-caveat">${escapeHtml(insider.caveat || '')}</p>
+  </div>`;
+}
+
+function renderFreshness(report) {
+  return `<div class="freshness-strip">
+    <span><b>Market data</b> ${escapeHtml(report.quote?.marketTime ? new Date(report.quote.marketTime).toLocaleString() : 'date unavailable')}</span>
+    <span><b>Financial period</b> ${escapeHtml(report.rows?.[0]?.evidence?.revenue?.periodEnd || report.rows?.[0]?.year || 'unavailable')}</span>
+    <span><b>Latest insider purchase</b> ${escapeHtml(report.insiders?.latestPurchaseDate || 'none found')}</span>
+  </div>`;
+}
+
 function renderReport(report) {
   const evaluation = screening.evaluateCandidate(report, state.criteria);
   const lookback = screening.lookbackKey(state.criteria);
@@ -590,6 +639,7 @@ function renderReport(report) {
   const filingUrl = report.filing?.url;
   const yahooUrl = `https://finance.yahoo.com/quote/${encodeURIComponent(report.ticker)}`;
   const latestRow = report.rows.find((row) => typeof row.fcf === "number" && typeof row.revenue === "number") || {};
+  const liveDecisionSummary = decisionText(report, evaluation);
 
   return `<div class="report-card report-summary">
     <div class="report-title">
@@ -614,6 +664,8 @@ function renderReport(report) {
       <div><span>FCF yield</span><strong>${percent(v.fcfYield)}</strong></div>
       <div><span>Evidence confidence</span><strong>${escapeHtml(report.evidenceConfidence?.level || "Unknown")}</strong></div>
     </div>
+    <p class="decision-summary-text">${escapeHtml(liveDecisionSummary)}</p>
+    ${renderFreshness(report)}
     ${renderConcernGroups(report, evaluation)}
   </div>
 
@@ -642,6 +694,8 @@ function renderReport(report) {
 
   <div class="report-section-heading detail-heading"><div><span>02</span><div><p class="kicker">Supporting analysis</p><h3>Evidence and expectations</h3></div></div><small>Detailed audit trail</small></div>
 
+  ${renderOwnerReturns(report)}
+  ${renderInsiderEvidence(report)}
   ${renderWaterfall(latestRow, n)}
   ${renderReverseDcf(report)}
 
@@ -757,7 +811,7 @@ $("#screen-form").addEventListener("submit", async (event) => {
     setStatus(`Screening ${tickers.length} ticker${tickers.length === 1 ? "" : "s"}...`);
     const data = await screenInBatches(tickers, (done, results) => {
       setStatus(`Analyzed ${done} of ${tickers.length}.`);
-      renderTable(container, results, "Watchlist results");
+      renderTable(container, results, "Watchlist results", "All");
     });
     setStatus(`Finished: ${data.results.length} analyzed, ${data.failures.length} failed.`);
   } catch (error) { setStatus(error.message, true); }
@@ -797,7 +851,7 @@ function updateAutoUi() {
   health.textContent = scan.rateLimited ? "Rate limit pause" : "Pacing active";
   health.classList.toggle("health-warning", Boolean(scan.rateLimited));
   health.classList.toggle("health-good", !scan.rateLimited);
-  if (examined > 0) renderTable($("#idea-results"), scan.results, "Current ideas");
+  if (examined > 0) renderTable($("#idea-results"), scan.allExamined || scan.results, "Analyzed companies", "Idea");
 }
 
 async function runAuto() {

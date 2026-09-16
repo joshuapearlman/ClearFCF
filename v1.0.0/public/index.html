@@ -101,7 +101,7 @@
           <div class="tolerance-head">
             <div>
               <strong>Screening criteria & presets</strong>
-              <small>Adjust parameters or select a preset to filter candidates in real time</small>
+              <small>Qualification criteria change Idea/Review status; display filters only change what is visible</small>
             </div>
             <div class="preset-buttons">
               <button type="button" class="preset-btn active" data-preset="default">★ Default</button>
@@ -110,6 +110,7 @@
             </div>
           </div>
           <div class="tolerance-grid">
+            <div class="tolerance-section-label"><strong>Qualification criteria</strong><small>These controls change the investment-screen decision.</small></div>
             <div class="tol-item">
               <div class="tol-label"><span>Max P/nFCF Multiple</span> <strong id="tol-multiple-val">15x</strong></div>
               <input type="range" id="tol-multiple" min="5" max="100" step="1" value="15">
@@ -146,15 +147,16 @@
               <div class="tol-label"><span>Min Positive FCF Years</span> <strong id="tol-posfcf-val">67%</strong></div>
               <input type="range" id="tol-posfcf" min="40" max="100" step="1" value="67">
             </div>
-            <div class="tol-item display-filter-item">
-              <div class="tol-label"><span>Min Dividend Yield <small>(display only)</small></span> <strong id="filter-dividend-val">Any</strong></div>
-              <input type="range" id="filter-dividend" min="0" max="10" step="0.5" value="0">
-            </div>
             <div class="tol-item tol-toggle-item">
               <label class="checkbox-label"><input type="checkbox" id="tol-solvency" checked> Enforce Near-Term Debt Solvency</label>
             </div>
             <div class="tol-item tol-toggle-item">
               <label class="checkbox-label"><input type="checkbox" id="tol-financials" checked> Exclude Financial Institutions</label>
+            </div>
+            <div class="tolerance-section-label display-section-label"><strong>Display filters</strong><small>These controls never change Idea, Review, or Excluded status.</small></div>
+            <div class="tol-item display-filter-item">
+              <div class="tol-label"><span>Min Dividend Yield <small>(display only)</small></span> <strong id="filter-dividend-val">Any</strong></div>
+              <input type="range" id="filter-dividend" min="0" max="10" step="0.5" value="0">
             </div>
           </div>
         </div>
