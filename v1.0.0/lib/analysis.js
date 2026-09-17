@@ -1,6 +1,6 @@
 "use strict";
 
-const { fetchSecCompany, extractFinancials, fetchRecentForm4Purchases } = require("./sec");
+const { fetchSecCompany, extractFinancials, fetchRecentForm4Purchases, fetchLatestAnnualSbcSeries } = require("./sec");
 const { fetchYahooQuote, fetchYahooFinancials, fetchExchangeRate, fetchYahooPriceHistory } = require("./yahoo");
 const { finite, round, median, standardDeviation } = require("./utils");
 const { evaluateCandidate } = require("../public/screening");
@@ -20,7 +20,8 @@ function evidenceForYear(series, year) {
     filed: fact.filed || null,
     form: fact.form || null,
     accession: fact.accn || null,
-    periodEnd: fact.end || null
+    periodEnd: fact.end || null,
+    shareBasis: fact.shareBasis || null
   };
 }
 
@@ -45,7 +46,9 @@ function annualRows(extracted) {
     const dna = valueForYear(extracted.series.dna, year);
     const interest = valueForYear(extracted.series.interestExpense, year);
     const sbc = valueForYear(extracted.series.sbc, year);
-    const shares = valueForYear(extracted.series.dilutedShares, year);
+    const shareFact = extracted.series.dilutedShares?.values?.get(year);
+    const shares = shareFact?.val ?? null;
+    const shareBasis = shareFact?.shareBasis || (finite(shares) ? "weighted-average diluted" : null);
     const buybackCashRaw = valueForYear(extracted.series.buybackCash, year);
     const buybackSharesRaw = valueForYear(extracted.series.buybackShares, year);
     const buybackCash = finite(buybackCashRaw) ? Math.abs(buybackCashRaw) : null;
@@ -57,7 +60,7 @@ function annualRows(extracted) {
     const fcfEconomic = finite(fcf) && finite(sbc) ? fcf - sbc : null;
 
     return {
-      year, revenue, ocf, capex, capexTangible, capexIntangible, dna, interest, sbc, shares,
+      year, revenue, ocf, capex, capexTangible, capexIntangible, dna, interest, sbc, shares, shareBasis,
       fcf,
       fcfEconomic,
       buybackCash,
@@ -74,6 +77,92 @@ function annualRows(extracted) {
   });
 }
 
+function cloneSeries(series, fallbackTag = "Unavailable") {
+  return {
+    ...(series || {}),
+    values: new Map(series?.values || []),
+    tag: series?.tag || fallbackTag,
+    label: series?.label || fallbackTag,
+    unit: series?.unit || "USD"
+  };
+}
+
+function mergeAnnualSeries(primary, fallback, options = {}) {
+  const merged = cloneSeries(primary, fallback?.tag);
+  for (const [year, fact] of fallback?.values || []) {
+    if (options.override === true || !merged.values.has(year)) merged.values.set(year, fact);
+  }
+  if (!merged.taxonomy && fallback?.taxonomy) merged.taxonomy = fallback.taxonomy;
+  if ((!merged.tag || merged.tag === "Unavailable") && fallback?.tag) merged.tag = fallback.tag;
+  if ((!merged.label || merged.label === "Unavailable") && fallback?.label) merged.label = fallback.label;
+  return merged;
+}
+
+function yahooOperatingCapexSeries(yahooFinancials) {
+  const total = yahooFinancials?.series?.capex;
+  const acquiredIntangibles = yahooFinancials?.series?.acquiredIntangibles;
+  const result = cloneSeries(total, "annualCapitalExpenditure");
+  result.values = new Map();
+  result.label = "Capital expenditure excluding acquired intangibles";
+  for (const [year, fact] of total?.values || []) {
+    const intangible = acquiredIntangibles?.values?.get(year)?.val;
+    const val = Math.max(0, Math.abs(fact.val) - (finite(intangible) ? Math.abs(intangible) : 0));
+    result.values.set(year, { ...fact, val, label: result.label });
+  }
+  return result;
+}
+
+function reconciliationNeeds(extracted, includeDetail = false) {
+  const rows = annualRows(extracted);
+  const latest = rows.find((row) => finite(row.fcf));
+  const capexSuspicious = Boolean(latest && finite(latest.capex) && finite(latest.dna) && latest.dna > 0 && latest.capex / latest.dna < 0.25);
+  const recent = rows.filter((row) => finite(row.revenue) && finite(row.fcf)).slice(0, 3);
+  const sbcMissing = includeDetail && (recent.length < 3 || recent.some((row) => !finite(row.sbc)));
+  const shortDebtMissing = includeDetail && !finite(extracted?.latest?.shortDebt?.val);
+  return { capexSuspicious, sbcMissing, shortDebtMissing, needed: capexSuspicious || sbcMissing || shortDebtMissing };
+}
+
+function reconcileAnnualFinancials(extracted, yahooFinancials, needs = reconciliationNeeds(extracted, true)) {
+  const next = {
+    ...extracted,
+    series: Object.fromEntries(Object.entries(extracted.series || {}).map(([key, value]) => [key, cloneSeries(value, key)])),
+    latest: { ...(extracted.latest || {}) }
+  };
+  const notes = [];
+  let capexReconciled = false;
+  let sbcReconciled = false;
+  let shortDebtReconciled = false;
+
+  if (needs.capexSuspicious) {
+    const secLatest = annualRows(next).find((row) => finite(row.capex) && finite(row.dna));
+    const operatingCapex = yahooOperatingCapexSeries(yahooFinancials);
+    const yahooLatest = [...operatingCapex.values.entries()].sort((a, b) => b[0] - a[0])[0]?.[1]?.val;
+    if (secLatest && finite(yahooLatest) && yahooLatest > secLatest.capex * 2 && yahooLatest >= secLatest.dna * 0.25) {
+      next.series.capex = mergeAnnualSeries(next.series.capex, operatingCapex, { override: true });
+      const intangible = cloneSeries(next.series.intangibleCapex, "Unavailable");
+      for (const year of operatingCapex.values.keys()) intangible.values.delete(year);
+      next.series.intangibleCapex = intangible;
+      capexReconciled = true;
+      notes.push("SEC CapEx facts appeared to capture acquired intangibles rather than operating capital expenditure; Yahoo annual CapEx less acquired intangibles was used for overlapping years.");
+    }
+  }
+
+  if (needs.sbcMissing && yahooFinancials?.series?.sbc?.values?.size) {
+    const before = next.series.sbc?.values?.size || 0;
+    next.series.sbc = mergeAnnualSeries(next.series.sbc, yahooFinancials.series.sbc);
+    sbcReconciled = next.series.sbc.values.size > before;
+    if (sbcReconciled) notes.push("Missing SEC SBC periods were filled from Yahoo annual stock-based compensation history.");
+  }
+
+  if (needs.shortDebtMissing && finite(yahooFinancials?.latest?.shortDebt?.val)) {
+    next.latest.shortDebt = yahooFinancials.latest.shortDebt;
+    shortDebtReconciled = true;
+    notes.push("SEC current debt was unavailable; Yahoo current debt was used for the near-term solvency check.");
+  }
+
+  return { extracted: next, notes, capexReconciled, sbcReconciled, shortDebtReconciled };
+}
+
 function normalize(rows, maxYears = null) {
   const allUsable = rows.filter((row) => finite(row.revenue) && row.revenue > 0 && finite(row.fcf));
   const usable = maxYears && maxYears > 0 ? allUsable.slice(0, maxYears) : allUsable;
@@ -85,14 +174,13 @@ function normalize(rows, maxYears = null) {
       totalRevenue: null, totalFcf: null, averageAnnualFcf: null, averageMargin: null,
       simpleAverageMargin: null, weightedMargin: null, blendedMargin: null, simpleVsWeightedGap: null,
       medianMargin: null, averageMedianGap: null, marginAgreement: false, outlierYears: [],
-      normalizedFcf: null, normalizedEconomicFcf: null, averageInterest: null
+      normalizedFcf: null, normalizedSbc: null, normalizedSbcToFcf: null,
+      normalizedEconomicFcf: null, sbcUsableYears: 0, averageInterest: null
     };
   }
 
   const totalRevenue = usable.reduce((sum, row) => sum + row.revenue, 0);
   const totalFcf = usable.reduce((sum, row) => sum + row.fcf, 0);
-  const economicComplete = usable.every((row) => finite(row.fcfEconomic) && finite(row.fcfEconomicMargin));
-  const totalEconomicFcf = economicComplete ? usable.reduce((sum, row) => sum + row.fcfEconomic, 0) : null;
   const averageAnnualFcf = totalFcf / usable.length;
   const interestRows = usable.filter((row) => finite(row.interest));
   const averageInterest = interestRows.length
@@ -137,13 +225,20 @@ function normalize(rows, maxYears = null) {
   // Normalized FCF (using the blended 50/50 margin)
   const normalizedFcf = blendedMargin * latestRevenue;
 
-  // Economic FCF (post-SBC) using blended margins
-  const simpleEconomicMargin = economicComplete
-    ? usable.reduce((sum, row) => sum + row.fcfEconomicMargin, 0) / usable.length
-    : null;
-  const weightedEconomicMargin = economicComplete && totalRevenue > 0 ? totalEconomicFcf / totalRevenue : null;
-  const blendedEconomicMargin = economicComplete ? (simpleEconomicMargin + weightedEconomicMargin) / 2 : null;
-  const normalizedEconomicFcf = finite(blendedEconomicMargin) ? blendedEconomicMargin * latestRevenue : null;
+  // Normalize recurring SBC over the latest three annual periods. Requiring an
+  // entire 10-year SBC series made otherwise complete filings fail, while using
+  // only the latest annual FCF made cyclical companies look artificially bad.
+  const recentSbcWindow = usable.slice(0, Math.min(3, usable.length));
+  const sbcRows = recentSbcWindow.filter((row) => finite(row.sbc) && finite(row.sbcToRevenue));
+  const sbcComplete = recentSbcWindow.length >= 3 && sbcRows.length === recentSbcWindow.length;
+  const sbcRevenue = sbcComplete ? sbcRows.reduce((sum, row) => sum + row.revenue, 0) : null;
+  const totalSbc = sbcComplete ? sbcRows.reduce((sum, row) => sum + Math.max(0, row.sbc), 0) : null;
+  const simpleSbcMargin = sbcComplete ? sbcRows.reduce((sum, row) => sum + row.sbcToRevenue, 0) / sbcRows.length : null;
+  const weightedSbcMargin = sbcComplete && sbcRevenue > 0 ? totalSbc / sbcRevenue : null;
+  const blendedSbcMargin = sbcComplete ? (simpleSbcMargin + weightedSbcMargin) / 2 : null;
+  const normalizedSbc = finite(blendedSbcMargin) ? blendedSbcMargin * latestRevenue : null;
+  const normalizedSbcToFcf = finite(normalizedSbc) && normalizedFcf > 0 ? normalizedSbc / normalizedFcf : null;
+  const normalizedEconomicFcf = finite(normalizedSbc) ? normalizedFcf - normalizedSbc : null;
 
   return {
     usableYears: usable.length,
@@ -164,7 +259,10 @@ function normalize(rows, maxYears = null) {
     medianAbsoluteDeviation,
     outlierYears,
     normalizedFcf,
+    normalizedSbc,
+    normalizedSbcToFcf,
     normalizedEconomicFcf,
+    sbcUsableYears: sbcRows.length,
     averageInterest,
     includedYears: usable.map((row) => row.year)
   };
@@ -173,15 +271,18 @@ function normalize(rows, maxYears = null) {
 function selectValuationShares(rows, instantFact) {
   const annualRow = rows.find((row) => finite(row.shares) && row.shares > 0);
   const annual = annualRow?.shares ?? null;
+  const annualDescription = annualRow?.shareBasis === "period-end outstanding"
+    ? "annual period-end shares outstanding"
+    : "annual diluted weighted-average shares";
   const instant = instantFact?.val ?? null;
   if (finite(annual) && finite(instant) && instant > 0) {
     const ratio = instant / annual;
     if (ratio >= 0.7 && ratio <= 1.3) {
       return { shares: instant, source: `SEC shares outstanding (${instantFact.end})`, annual, instant, inconsistent: false };
     }
-    return { shares: annual, source: `Latest annual diluted weighted-average shares (${annualRow.year})`, annual, instant, inconsistent: true };
+    return { shares: annual, source: `Latest ${annualDescription} (${annualRow.year})`, annual, instant, inconsistent: true };
   }
-  if (finite(annual)) return { shares: annual, source: `Latest annual diluted weighted-average shares (${annualRow.year})`, annual, instant: null, inconsistent: false };
+  if (finite(annual)) return { shares: annual, source: `Latest ${annualDescription} (${annualRow.year})`, annual, instant: null, inconsistent: false };
   if (finite(instant) && instant > 0) return { shares: instant, source: `SEC shares outstanding (${instantFact.end})`, annual: null, instant, inconsistent: false };
   return { shares: null, source: "Unavailable", annual, instant, inconsistent: false };
 }
@@ -236,7 +337,11 @@ function computeQuality(rows, normalized, currentPrice = null) {
   const usable = rows.filter((row) => finite(row.fcf) && finite(row.revenue) && row.revenue > 0);
   const positiveYears = usable.filter((row) => row.fcf > 0).length;
   const margins = usable.map((row) => row.fcfMargin);
-  const shareRows = rows.filter((row) => finite(row.shares) && row.shares > 0);
+  const allShareRows = rows.filter((row) => finite(row.shares) && row.shares > 0);
+  const newestShareBasis = allShareRows[0]?.shareBasis || null;
+  const shareRows = newestShareBasis
+    ? allShareRows.filter((row) => row.shareBasis === newestShareBasis)
+    : allShareRows;
   const comparableShares = shareRows.length ? [shareRows[0]] : [];
   for (let index = 1; index < shareRows.length; index += 1) {
     const prior = comparableShares.at(-1).shares;
@@ -247,6 +352,10 @@ function computeQuality(rows, normalized, currentPrice = null) {
   const latestShares = comparableShares[0]?.shares;
   const oldestShares = comparableShares.length >= 2 ? comparableShares.at(-1)?.shares : null;
   const dilution = finite(latestShares) && finite(oldestShares) && oldestShares > 0 ? latestShares / oldestShares - 1 : null;
+  const dilutionYears = Number.isInteger(comparableShares[0]?.year) && Number.isInteger(comparableShares.at(-1)?.year)
+    ? Math.abs(comparableShares[0].year - comparableShares.at(-1).year) : null;
+  const annualizedDilution = finite(dilution) && finite(dilutionYears) && dilutionYears > 0 && latestShares > 0 && oldestShares > 0
+    ? (latestShares / oldestShares) ** (1 / dilutionYears) - 1 : null;
   const latestSbc = rows.find((row) => finite(row.sbc));
 
   // Cumulative CapEx vs Cumulative D&A over usable periods
@@ -255,8 +364,9 @@ function computeQuality(rows, normalized, currentPrice = null) {
   const capexToDnaRatio = totalDna > 0 ? totalCapex / totalDna : null;
 
   // 1. Share Buyback Capital Allocation Audit (with SEC unit scale check)
-  const totalBuybackCash = rows.reduce((sum, r) => sum + (finite(r.buybackCash) ? Math.abs(r.buybackCash) : 0), 0);
-  let totalBuybackShares = rows.reduce((sum, r) => sum + (finite(r.buybackShares) ? Math.abs(r.buybackShares) : 0), 0);
+  const pairedBuybackRows = rows.filter((row) => finite(row.buybackCash) && row.buybackCash > 0 && finite(row.buybackShares) && row.buybackShares > 0);
+  const totalBuybackCash = pairedBuybackRows.reduce((sum, r) => sum + Math.abs(r.buybackCash), 0);
+  let totalBuybackShares = pairedBuybackRows.reduce((sum, r) => sum + Math.abs(r.buybackShares), 0);
   let averageBuybackPrice = totalBuybackShares > 0 && totalBuybackCash > 0 ? totalBuybackCash / totalBuybackShares : null;
 
   // SEC Unit Scaling Sanity Check: If shares were reported in thousands while cash was in exact dollars
@@ -275,7 +385,7 @@ function computeQuality(rows, normalized, currentPrice = null) {
       if (buybackPriceVsCurrent <= 0.85) {
         buybackAllocationRating = "Accretive";
       } else if (buybackPriceVsCurrent >= 1.25) {
-        buybackAllocationRating = "Value Destructive";
+        buybackAllocationRating = buybackPriceVsCurrent > 5 ? "Unreliable" : "Value Destructive";
       } else {
         buybackAllocationRating = "Neutral";
       }
@@ -315,15 +425,21 @@ function computeQuality(rows, normalized, currentPrice = null) {
     positiveFcfRatio: usable.length ? positiveYears / usable.length : null,
     marginVolatility: standardDeviation(margins),
     shareChange: dilution,
+    shareChangeYears: dilutionYears,
+    shareChangeAnnualized: annualizedDilution,
+    shareChangeBasis: newestShareBasis,
     latestSbcToRevenue: latestSbc?.sbcToRevenue ?? null,
     latestSbcToFcf: latestSbc?.sbcToFcf ?? null,
+    normalizedSbcToFcf: normalized.normalizedSbcToFcf ?? null,
+    sbcCoverageYears: normalized.sbcUsableYears ?? 0,
     capexToDnaRatio,
     buybackAudit: {
       totalCashSpent: totalBuybackCash,
       totalSharesRepurchased: totalBuybackShares,
       averageBuybackPrice,
       buybackPriceVsCurrent,
-      rating: buybackAllocationRating
+      rating: buybackAllocationRating,
+      coverageYears: pairedBuybackRows.length
     },
     fcfTrajectory,
     recent3yAvgMargin,
@@ -470,6 +586,48 @@ async function analyzeTicker(rawTicker, options = {}) {
       tickers: [ticker],
       filings: { recent: {} }
     };
+  }
+  const dataReconciliation = {
+    notes: [],
+    capexSuspicious: false,
+    capexReconciled: false,
+    capexReliable: true,
+    sbcReconciled: false,
+    shortDebtReconciled: false
+  };
+  if (financialSource === "SEC Company Facts") {
+    const initialNeeds = reconciliationNeeds(extracted, options.includeDetail === true);
+    dataReconciliation.capexSuspicious = initialNeeds.capexSuspicious;
+    const supplementalAttempt = initialNeeds.sbcMissing
+      ? fetchLatestAnnualSbcSeries(company, submissions).catch(() => null)
+      : Promise.resolve(null);
+    const yahooFinancialAttempt = initialNeeds.needed
+      ? fetchYahooFinancials(ticker).catch(() => null)
+      : Promise.resolve(null);
+    const [supplementalSbc, yahooFinancials] = await Promise.all([supplementalAttempt, yahooFinancialAttempt]);
+
+    if (supplementalSbc?.values?.size) {
+      const before = extracted.series.sbc?.values?.size || 0;
+      extracted = {
+        ...extracted,
+        series: { ...extracted.series, sbc: mergeAnnualSeries(extracted.series.sbc, supplementalSbc) }
+      };
+      if (extracted.series.sbc.values.size > before) {
+        dataReconciliation.sbcReconciled = true;
+        dataReconciliation.notes.push("Recent SBC history was recovered from the inline annual filing.");
+      }
+    }
+
+    const remainingNeeds = reconciliationNeeds(extracted, options.includeDetail === true);
+    if (yahooFinancials && remainingNeeds.needed) {
+      const reconciled = reconcileAnnualFinancials(extracted, yahooFinancials, remainingNeeds);
+      extracted = reconciled.extracted;
+      dataReconciliation.notes.push(...reconciled.notes);
+      dataReconciliation.capexReconciled = reconciled.capexReconciled;
+      dataReconciliation.sbcReconciled ||= reconciled.sbcReconciled;
+      dataReconciliation.shortDebtReconciled = reconciled.shortDebtReconciled;
+    }
+    dataReconciliation.capexReliable = !dataReconciliation.capexSuspicious || dataReconciliation.capexReconciled;
   }
   let rows = annualRows(extracted);
   let normalized = normalize(rows); // Full history (up to 10Y)
@@ -648,13 +806,15 @@ async function analyzeTicker(rawTicker, options = {}) {
   if (normalized.usableYears < sourceMinimumYears) warnings.push(`Only ${normalized.usableYears} usable annual periods; ${sourceMinimumYears} are required for this data source.`);
   if (!finite(price)) warnings.push("Current price is unavailable.");
   if (!finite(effectiveShares)) warnings.push("Current share count is unavailable.");
-  if (shareSelection.inconsistent && !suppliedMarketCap) warnings.push(`SEC instant shares (${round(shareSelection.instant)}) differ materially from annual diluted shares (${round(shareSelection.annual)}); valuation uses the annual diluted figure.`);
+  if (shareSelection.inconsistent && !suppliedMarketCap) warnings.push(`SEC instant shares (${round(shareSelection.instant)}) differ materially from the latest annual share figure (${round(shareSelection.annual)}); valuation uses the annual figure.`);
   if (finite(valuation.fcfYield) && valuation.fcfYield > 0.50) warnings.push("Normalized FCF yield exceeds 50%; verify market capitalization and cash-flow facts before relying on valuation.");
   if (finite(valuation.fcfYield) && valuation.fcfYield > 0.25) warnings.push("Elevated FCF yield (>25%): deep value opportunity or potential distress; inspect balance sheet and business durability.");
   if (ownerReturns.dividendSafety.highYieldRisk) warnings.push("High dividend yield is paired with a stretched normalized-FCF payout ratio; verify dividend sustainability.");
   if (ownerReturns.dividendSafety.latestCut) warnings.push("The latest annual dividend per share is lower than the prior annual period.");
   if (!finite(cash) || !finite(debt)) warnings.push("Cash or debt data is incomplete; the company cannot qualify automatically.");
   warnings.push(...balanceSheet.notes);
+  warnings.push(...dataReconciliation.notes);
+  if (!dataReconciliation.capexReliable) warnings.push("The available CapEx fact appears to represent a narrow acquisition category rather than total operating capital expenditure; FCF cannot qualify automatically.");
   
   if (fxRate !== 1.0) {
     warnings.push(`Financial statements reported in ${financialCurrency} converted to ${quoteCurrency} at exchange rate ~${round(fxRate, 4)}.`);
@@ -682,11 +842,13 @@ async function analyzeTicker(rawTicker, options = {}) {
   // Buyback capital allocation warning
   if (quality.buybackAudit?.rating === "Value Destructive") {
     warnings.push(`Historical buybacks appear destructive: Average repurchase price ($${round(quality.buybackAudit.averageBuybackPrice, 2)}) is significantly above current market price ($${round(price, 2)}).`);
+  } else if (quality.buybackAudit?.rating === "Unreliable") {
+    warnings.push("Buyback cash and repurchased-share disclosures do not produce a plausible average purchase price; the buyback rating is unavailable.");
   }
 
   // SBC Burden check
-  if (quality.latestSbcToFcf && quality.latestSbcToFcf > 0.25) {
-    warnings.push(`Heavy SBC burden: Stock-based compensation absorbs ${round(quality.latestSbcToFcf * 100, 0)}% of reported annual FCF.`);
+  if (quality.normalizedSbcToFcf && quality.normalizedSbcToFcf > 0.25) {
+    warnings.push(`Heavy recurring SBC burden: normalized stock-based compensation absorbs ${round(quality.normalizedSbcToFcf * 100, 0)}% of normalized FCF.`);
   }
 
   // Simple vs Volume-weighted margin comparison
@@ -694,7 +856,11 @@ async function analyzeTicker(rawTicker, options = {}) {
     warnings.push(`Margin divergence: Simple average margin (${round(normalized.simpleAverageMargin * 100, 1)}%) differs by ${round(normalized.simpleVsWeightedGap * 100, 1)}% from volume-weighted margin (${round(normalized.weightedMargin * 100, 1)}%).`);
   }
 
-  if (finite(quality.shareChange) && quality.shareChange > 0.25) warnings.push(`Share count increased by ${round(quality.shareChange * 100, 1)}% over the available period (exceeds 25% threshold).`);
+  if (finite(quality.shareChange) && quality.shareChange > 0.25) {
+    const annualized = finite(quality.shareChangeAnnualized) ? `, approximately ${round(quality.shareChangeAnnualized * 100, 1)}% annualized` : "";
+    const span = finite(quality.shareChangeYears) ? ` over ${quality.shareChangeYears} years` : " over the available period";
+    warnings.push(`Share count increased by ${round(quality.shareChange * 100, 1)}%${span}${annualized} (exceeds 25% cumulative threshold).`);
+  }
   if (quality.reliability === "Low") warnings.push("Free cash flow history is inconsistent (<67% positive years).");
   if (!normalized.marginAgreement) warnings.push(`Average and median annual FCF margins differ by more than 25%${finite(normalized.averageMedianGap) ? ` (${round(normalized.averageMedianGap * 100, 1)}%)` : ""}; this stock cannot qualify automatically.`);
   if (normalized.outlierYears.length) warnings.push(`Extreme annual FCF margin detected in: ${normalized.outlierYears.map((item) => item.year).join(", ")}.`);
@@ -704,7 +870,11 @@ async function analyzeTicker(rawTicker, options = {}) {
   if (!valuationSane) warnings.push("Valuation failed sanity thresholds (market cap >= $10M and FCF yield between 0% and 50%) and cannot qualify automatically.");
 
   const filing = latestFiling(submissions);
-  const criticalMissing = [debt, cash, effectiveShares, quality.latestSbcToFcf, normalized.normalizedEconomicFcf].some((item) => !finite(item)) || !currencyConversionValid;
+  const solvencyRequired = options.criteria?.enforceSolvency !== false;
+  const criticalMissing = [debt, cash, effectiveShares, quality.normalizedSbcToFcf, normalized.normalizedEconomicFcf].some((item) => !finite(item))
+    || (solvencyRequired && !finite(shortDebt))
+    || !dataReconciliation.capexReliable
+    || !currencyConversionValid;
   const evidenceConfidence = {
     level: criticalMissing ? "Unsafe" : financialSource !== "SEC Company Facts" || normalized.usableYears < 6 ? "Partial" : balanceSheet.reconciled ? "Reconciled" : "Complete",
     criticalMissing,
@@ -730,6 +900,7 @@ async function analyzeTicker(rawTicker, options = {}) {
     shareholderYield: ownerReturns.shareholderYield,
     insiders,
     valuationHistory,
+    dataReconciliation,
     evidenceConfidence,
     warnings,
     filing: filing ? { ...filing, url: filingUrl(company.cik, filing) } : null,
@@ -740,7 +911,7 @@ async function analyzeTicker(rawTicker, options = {}) {
       unleveredFcf: "Normalized FCF + after-tax net interest expense for enterprise valuation"
     },
     sources: {
-      financials: financialSource,
+      financials: dataReconciliation.notes.length ? `${financialSource} with targeted reconciliation` : financialSource,
       price: quoteResult.source,
       shares: shareSelection.source,
       marketCap: marketCapSource,
@@ -757,6 +928,8 @@ async function analyzeTicker(rawTicker, options = {}) {
   report.status = evaluation.status;
   report.passesDefaultIdeaFilter = evaluation.status === "Idea";
   report.primaryReason = evaluation.exclusions[0] || evaluation.failures[0] || evaluation.unknowns[0] || "All active qualification checks passed";
+  report.nonQualificationReasons = evaluation.reasons || [];
+  report.nonQualificationReason = report.nonQualificationReasons.join("; ");
   report.decisionSummary = decisionSummary(report);
   return report;
 }
@@ -775,7 +948,10 @@ function decisionSummary(report) {
   if (finite(report.quality?.positiveFcfRatio)) parts.push(`positive FCF in ${round(report.quality.positiveFcfRatio * 100, 0)}% of usable years`);
   if (report.insiders?.clusterBuying) parts.push("recent cluster insider buying");
   else if (report.insiders?.hasRecentBuying) parts.push("recent insider buying");
-  return `${report.status}: ${parts.slice(0, 4).join(", ") || report.primaryReason}.`;
+  const summary = `${report.status}: ${parts.slice(0, 4).join(", ") || report.primaryReason}.`;
+  return report.status === "Idea" || !report.nonQualificationReason
+    ? summary
+    : `${summary} Why not Idea: ${report.nonQualificationReason}.`;
 }
 
 function summary(report) {
@@ -820,6 +996,8 @@ function summary(report) {
     marketDataAsOf: report.quote?.marketTime || null,
     financialPeriodEnd: report.rows?.[0]?.evidence?.revenue?.periodEnd || String(report.rows?.[0]?.year || ""),
     primaryReason: report.primaryReason,
+    nonQualificationReason: report.nonQualificationReason,
+    nonQualificationReasons: report.nonQualificationReasons,
     decisionSummary: report.decisionSummary,
     latestRevenue: round(report.normalized.latestRevenue),
     latestFcf: round(report.normalized.latestReportedFcf),
@@ -859,8 +1037,14 @@ function summary(report) {
     cash: round(report.valuation.cash),
     shares: round(report.valuation.shares),
     shareChange: round(report.quality.shareChange, 4),
+    shareChangeYears: report.quality.shareChangeYears,
+    shareChangeAnnualized: round(report.quality.shareChangeAnnualized, 4),
+    shareChangeBasis: report.quality.shareChangeBasis,
     latestSbcToRevenue: round(report.quality.latestSbcToRevenue, 4),
     latestSbcToFcf: round(report.quality.latestSbcToFcf, 4),
+    normalizedSbcToFcf: round(report.quality.normalizedSbcToFcf, 4),
+    sbcCoverageYears: report.quality.sbcCoverageYears,
+    dataReconciliation: report.dataReconciliation,
     warnings: report.warnings,
     evidenceConfidence: report.evidenceConfidence,
     evaluation: report.evaluation,
@@ -894,4 +1078,19 @@ async function analyzeBatch(tickers, options = {}) {
   return { results, reports, failures };
 }
 
-module.exports = { annualRows, normalize, computeQuality, computeOwnerReturns, computeValuationHistory, selectValuationShares, debtValue, reconcileBalanceSheet, analyzeTicker, analyzeBatch, summary };
+module.exports = {
+  annualRows,
+  normalize,
+  computeQuality,
+  computeOwnerReturns,
+  computeValuationHistory,
+  selectValuationShares,
+  reconciliationNeeds,
+  reconcileAnnualFinancials,
+  mergeAnnualSeries,
+  debtValue,
+  reconcileBalanceSheet,
+  analyzeTicker,
+  analyzeBatch,
+  summary
+};

@@ -476,7 +476,8 @@ tbody tr { cursor: pointer; transition: background-color var(--motion-fast) ease
 tbody tr:hover { background: var(--green-tint); box-shadow: inset 4px 0 0 var(--green); }
 .ticker { font-weight: 700; font-family: var(--sans); }
 .subname { display: block; font-size: 11px; color: var(--muted); max-width: 180px; overflow: hidden; text-overflow: ellipsis; font-family: var(--sans); }
-.result-summary { display: block; margin-top: 5px; max-width: 190px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font: 10px/1.35 var(--sans); }
+.result-summary { display: block; margin-top: 5px; max-width: 190px; overflow: hidden; color: var(--muted); font: 10px/1.35 var(--sans); white-space: normal; }
+.result-summary.not-qualified { color: var(--red); font-weight: 650; }
 .cell-note { display: block; margin-top: 3px; color: var(--muted); font: 9px var(--sans); }
 .decision-summary-text { margin: 12px 0 0; color: var(--ink-soft); font: 600 13px/1.5 var(--sans); }
 .freshness-strip { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 10px; padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--paper-2); color: var(--muted); font: 10px var(--mono); }
@@ -581,6 +582,10 @@ tbody tr:hover { background: var(--green-tint); box-shadow: inset 4px 0 0 var(--
 .decision-strip .decision-idea { color: var(--green); }
 .decision-strip .decision-review { color: var(--amber); }
 .decision-strip .decision-excluded { color: var(--red); }
+.qualification-callout { margin-top: 12px; padding: 11px 13px; border-left: 3px solid var(--red); border-radius: 0 var(--radius-s) var(--radius-s) 0; background: var(--red-tint); color: var(--ink-soft); font-size: 12px; }
+.qualification-callout strong { color: var(--red); }
+.qualification-callout ul { margin: 5px 0 0; padding-left: 18px; }
+.qualification-callout li + li { margin-top: 3px; }
 
 .concern-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
 .concern-card { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--paper-2); }
@@ -868,6 +873,14 @@ tbody tr:hover { background: var(--green-tint); box-shadow: inset 4px 0 0 var(--
   #analyze.view { display: block !important; animation: none !important; transform: none !important; filter: none !important; }
   .compact-panel { display: none !important; }
   #report { width: 100% !important; overflow: visible !important; animation: none !important; transform: none !important; }
+  #report *, #report.reveal .report-card, #report.reveal .metric {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+    filter: none !important;
+    opacity: 1 !important;
+  }
+  #report .metric-hint { display: none !important; }
   .report-section-heading { margin-top: 18px !important; break-after: avoid; }
   .report-card, .metric {
     box-shadow: none !important;
@@ -886,13 +899,14 @@ tbody tr:hover { background: var(--green-tint); box-shadow: inset 4px 0 0 var(--
   .research-lede > div { padding: 12px !important; }
   .why-cheap-grid, .research-two-column, .research-three-column, .research-cases { gap: 7px !important; }
   .table-wrap, .table-scroll { overflow: visible !important; }
-  table { width: 100% !important; table-layout: fixed; font-size: 7pt !important; }
+  table { width: 100% !important; min-width: 0 !important; table-layout: fixed; font-size: 7pt !important; }
   thead { display: table-header-group; }
   tr { break-inside: avoid; }
   th, td { overflow-wrap: anywhere; white-space: normal !important; }
   .research-financial-table { min-width: 0 !important; }
   .research-sources ol { columns: 1 !important; }
   .report-grid { grid-template-columns: repeat(4, 1fr) !important; gap: 1px !important; margin: 8px 0 !important; }
+  .methodology-card { break-inside: avoid !important; }
   .metric strong { font-size: 16pt !important; }
   a { color: inherit !important; text-decoration: none !important; }
 }

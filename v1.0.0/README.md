@@ -56,6 +56,8 @@ The `.github/workflows/mac-release.yml` workflow runs on `v*` tags, builds the M
 - **Configurable ChatGPT-Connected Deep Research (Mac/Desktop)**: Choose GPT-5.6 Sol, Terra, Luna, or GPT-5.5 plus low through max reasoning effort, then use your ChatGPT sign-in to investigate why a stock may be cheap, current developments, long-term financial history, accounting risks, peers, catalysts, and valuation scenarios with linked sources; no API key required
 - **Complete PDF Reports (Mac/Desktop)**: Save the entire company analysis, including completed Deep Research, directly to a paginated PDF instead of using the system print dialog
 - **Complete Result Funnel**: Separate Idea, Review, Excluded, and All tabs retain near-misses and missing-data cases
+- **Visible Non-Qualification Reasons**: Every Review or Excluded result shows each failed, missing, or exclusion rule directly in the table, full report, PDF, and CSV export
+- **Historical Share Fallbacks**: Prefers annual diluted weighted-average shares, then uses clearly tagged SEC period-end common shares when issuers omit the standard diluted-share concept
 - **Decision Explanations & Freshness**: Plain-language result summaries with market, filing-period, and insider-activity dates
 - Detailed single-company reports and calculation audits
 - Evidence-confidence gating with explicit pass, fail, exclusion, and unknown reasons

@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { normalize, computeQuality, computeOwnerReturns, computeValuationHistory, selectValuationShares } = require("../lib/analysis");
+const { annualRows, normalize, computeQuality, computeOwnerReturns, computeValuationHistory, selectValuationShares, reconcileAnnualFinancials } = require("../lib/analysis");
 
 function row(year, revenue, fcf, shares = 100, sbc = 5, dna = 20) {
   return {
@@ -71,6 +71,22 @@ test("economic FCF accounts for SBC deduction", () => {
   assert.equal(result.normalizedEconomicFcf, 15);
 });
 
+test("recent normalized SBC burden does not divide by one cyclically depressed FCF year", () => {
+  const rows = [
+    row(2025, 34_190, 28, 272, 163),
+    row(2024, 35_440, 2_232, 283, 177),
+    row(2023, 34_230, 5_080, 290, 161),
+    row(2022, 33_670, 3_210, 307, 184),
+    row(2021, 27_130, 2_470, 309, 135),
+    row(2020, 22_490, 4_120, 318, 107)
+  ];
+  const result = normalize(rows);
+  assert.ok(rows[0].sbcToFcf > 5);
+  assert.equal(result.sbcUsableYears, 3);
+  assert.ok(result.normalizedSbcToFcf < 0.10);
+  assert.ok(result.normalizedEconomicFcf > 0);
+});
+
 test("under-investment check flags CapEx well below Depreciation", () => {
   const rows = [
     { fcf: 10, revenue: 100, capex: 10, dna: 30, shares: 100 }, // CapEx / DNA = 33%
@@ -97,6 +113,58 @@ test("buyback allocation audit correctly computes average buyback price and accr
   assert.equal(quality.buybackAudit.totalSharesRepurchased, 2_000_000);
   assert.equal(quality.buybackAudit.averageBuybackPrice, 50);
   assert.equal(quality.buybackAudit.rating, "Accretive");
+});
+
+test("buyback audit only combines years with matched cash and share evidence", () => {
+  const rows = [
+    { year: 2025, fcf: 100, revenue: 1000, buybackCash: 500_000_000, buybackShares: null, shares: 10_000_000, fcfMargin: 0.1 },
+    { year: 2024, fcf: 100, revenue: 1000, buybackCash: 50_000_000, buybackShares: 1_000_000, shares: 11_000_000, fcfMargin: 0.1 }
+  ];
+  const quality = computeQuality(rows, { usableYears: 6 }, 70);
+  assert.equal(quality.buybackAudit.totalCashSpent, 50_000_000);
+  assert.equal(quality.buybackAudit.totalSharesRepurchased, 1_000_000);
+  assert.equal(quality.buybackAudit.averageBuybackPrice, 50);
+  assert.equal(quality.buybackAudit.coverageYears, 1);
+});
+
+test("dilution reports cumulative change, elapsed years, and annualized rate", () => {
+  const rows = [
+    { year: 2025, fcf: 100, revenue: 1000, shares: 1_000, shareBasis: "weighted-average diluted", fcfMargin: 0.1 },
+    { year: 2024, fcf: 100, revenue: 1000, shares: 967, shareBasis: "weighted-average diluted", fcfMargin: 0.1 },
+    { year: 2016, fcf: 100, revenue: 1000, shares: 763.8, shareBasis: "weighted-average diluted", fcfMargin: 0.1 }
+  ];
+  const quality = computeQuality(rows, { usableYears: 6 }, 60);
+  assert.ok(Math.abs(quality.shareChange - (1000 / 763.8 - 1)) < 1e-12);
+  assert.equal(quality.shareChangeYears, 9);
+  assert.ok(quality.shareChangeAnnualized > 0.02 && quality.shareChangeAnnualized < 0.04);
+});
+
+test("suspicious SEC CapEx is reconciled to Yahoo total CapEx less acquired intangibles", () => {
+  const series = (tag, values) => ({ tag, label: tag, taxonomy: "test", unit: "USD", values: new Map(values.map(([year, val]) => [year, { val, end: `${year}-12-31`, tag, taxonomy: "test", unit: "USD" }])) });
+  const extracted = {
+    series: {
+      revenue: series("Revenue", [[2025, 138_190]]),
+      ocf: series("OCF", [[2025, 37_137]]),
+      capex: series("PaymentsToAcquireProductiveAssets", [[2025, 450]]),
+      intangibleCapex: series("Unavailable", []),
+      dna: series("D&A", [[2025, 18_349]]),
+      sbc: series("SBC", []),
+      dilutedShares: series("Shares", [[2025, 4_230]]),
+      interestExpense: series("Interest", []), buybackCash: series("Buyback", []), buybackShares: series("Buyback shares", []), dividendsPaid: series("Dividends", [])
+    },
+    latest: {}
+  };
+  const yahoo = {
+    series: {
+      capex: series("annualCapitalExpenditure", [[2025, -17_461]]),
+      acquiredIntangibles: series("annualPurchaseOfIntangibles", [[2025, -450]]),
+      sbc: series("annualStockBasedCompensation", [])
+    },
+    latest: {}
+  };
+  const result = reconcileAnnualFinancials(extracted, yahoo, { capexSuspicious: true, sbcMissing: false, shortDebtMissing: false });
+  assert.equal(result.capexReconciled, true);
+  assert.equal(annualRows(result.extracted)[0].capex, 17_011);
 });
 
 test("FCF trajectory detects deteriorating margin trend", () => {

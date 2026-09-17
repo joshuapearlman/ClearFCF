@@ -107,8 +107,23 @@
     if (Number.isFinite(maxEv)) recordMax("EV/unlevered nFCF", selected.evToUnleveredNfcf, maxEv);
 
     recordMax("Net debt/nFCF", selected.netDebtToNfcf, threshold(criteria.maxDebt, 4));
-    recordMax("SBC/annual FCF", get("latestSbcToFcf", "quality", "latestSbcToFcf"), threshold(criteria.maxSbc, 0.30));
-    recordMax("Historical dilution", get("shareChange", "quality", "shareChange"), threshold(criteria.maxDilution, 0.25));
+    const normalizedSbcToFcf = get("normalizedSbcToFcf", "quality", "normalizedSbcToFcf");
+    const legacySbcToFcf = get("latestSbcToFcf", "quality", "latestSbcToFcf");
+    recordMax("Recent 3-year normalized SBC/FCF", finite(normalizedSbcToFcf) ? normalizedSbcToFcf : legacySbcToFcf, threshold(criteria.maxSbc, 0.30));
+
+    const dilution = get("shareChange", "quality", "shareChange");
+    const maxDilution = threshold(criteria.maxDilution, 0.25);
+    const dilutionYears = get("shareChangeYears", "quality", "shareChangeYears");
+    const annualizedDilution = get("shareChangeAnnualized", "quality", "shareChangeAnnualized");
+    if (!finite(dilution)) unknown.push("Historical dilution is unavailable");
+    else if (dilution <= maxDilution) pass.push("Historical dilution is within the limit");
+    else {
+      const span = finite(dilutionYears) ? ` over ${Math.round(dilutionYears)} years` : "";
+      const annualized = finite(annualizedDilution) ? `; ${(annualizedDilution * 100).toFixed(1)}% annualized` : "";
+      fail.push(`Historical dilution exceeds the limit (${(dilution * 100).toFixed(1)}%${span}${annualized})`);
+    }
+
+    if (row?.dataReconciliation?.capexReliable === false) unknown.push("Capital expenditure classification is unreliable");
 
     const positiveRatio = get("positiveFcfRatio", "quality", "positiveFcfRatio");
     const minPositive = threshold(criteria.minPosFcf, 0.67);
@@ -141,7 +156,12 @@
 
     const requireComplete = criteria.requireCompleteData !== false;
     const status = excluded.length ? "Excluded" : fail.length || (requireComplete && unknown.length) ? "Review" : "Idea";
-    return { status, passes: pass, failures: fail, unknowns: unknown, exclusions: excluded, selected };
+    const reasons = status === "Idea" ? [] : [
+      ...excluded.map((reason) => `Excluded: ${reason}`),
+      ...fail.map((reason) => `Failed: ${reason}`),
+      ...(requireComplete ? unknown.map((reason) => `Missing: ${reason}`) : [])
+    ];
+    return { status, passes: pass, failures: fail, unknowns: unknown, exclusions: excluded, reasons, selected };
   }
 
   return { evaluateCandidate, selectedMetrics, lookbackKey };

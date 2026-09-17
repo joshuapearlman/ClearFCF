@@ -38,8 +38,9 @@ const TAGS = {
     "InterestAndDebtExpense",
     "InterestExpenseDebt"
   ],
-  sbc: ["ShareBasedCompensation"],
+  sbc: ["ShareBasedCompensation", "AllocatedShareBasedCompensationExpense"],
   dilutedShares: ["WeightedAverageNumberOfDilutedSharesOutstanding", "WeightedAverageNumberOfSharesOutstandingBasicAndDiluted"],
+  periodEndShares: ["CommonStockSharesOutstanding", "EntityCommonStockSharesOutstanding"],
   sharesOutstanding: ["EntityCommonStockSharesOutstanding", "CommonStockSharesOutstanding"],
   cash: ["CashCashEquivalentsAndShortTermInvestments", "CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"],
   totalDebt: [
@@ -269,6 +270,52 @@ function bestAnnualSeries(facts, tags) {
   return { values: mergedValues, taxonomy: bestTaxonomy, tag: bestTag, label: bestLabel, unit: bestUnit };
 }
 
+function bestHistoricalShareSeries(facts) {
+  const preferred = bestAnnualSeries(facts, TAGS.dilutedShares);
+  for (const fact of preferred.values.values()) fact.shareBasis = "weighted-average diluted";
+
+  const fallbackValues = new Map();
+  for (const tag of TAGS.periodEndShares) {
+    for (const { taxonomy, concept } of allConcepts(facts, tag)) {
+      const candidates = factUnits(concept, ["shares"]).filter((fact) =>
+        finite(fact.val) && fact.val > 0 && fact.end
+        && ["10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"].includes(fact.form)
+      );
+      for (const fact of candidates) {
+        const endYear = Number(String(fact.end).slice(0, 4));
+        const fiscalYear = Number(fact.fy);
+        const year = tag === "EntityCommonStockSharesOutstanding" && Number.isInteger(fiscalYear)
+          ? fiscalYear
+          : endYear;
+        if (!Number.isInteger(year)) continue;
+        const current = fallbackValues.get(year);
+        if (!current || String(fact.filed || "") > String(current.filed || "")) {
+          fallbackValues.set(year, {
+            ...fact,
+            taxonomy,
+            tag,
+            label: `${concept.label || tag} (period-end fallback)`,
+            unit: "shares",
+            shareBasis: "period-end outstanding"
+          });
+        }
+      }
+    }
+  }
+
+  for (const [year, fact] of fallbackValues) {
+    if (!preferred.values.has(year)) preferred.values.set(year, fact);
+  }
+  if (!preferred.tag && fallbackValues.size) {
+    const first = fallbackValues.values().next().value;
+    preferred.tag = first.tag;
+    preferred.label = first.label;
+    preferred.taxonomy = first.taxonomy;
+    preferred.unit = "shares";
+  }
+  return preferred;
+}
+
 function latestInstant(facts, tags) {
   for (const tag of tags) {
     const candidates = allConcepts(facts, tag).flatMap(({ concept, taxonomy }) =>
@@ -281,9 +328,10 @@ function latestInstant(facts, tags) {
 
 function extractFinancials(facts) {
   const series = {};
-  for (const key of ["revenue", "ocf", "capex", "intangibleCapex", "dna", "interestExpense", "sbc", "dilutedShares", "buybackCash", "buybackShares", "dividendsPaid"]) {
+  for (const key of ["revenue", "ocf", "capex", "intangibleCapex", "dna", "interestExpense", "sbc", "buybackCash", "buybackShares", "dividendsPaid"]) {
     series[key] = bestAnnualSeries(facts, TAGS[key]);
   }
+  series.dilutedShares = bestHistoricalShareSeries(facts);
   const cash = latestInstant(facts, TAGS.cash);
   const totalDebt = latestInstant(facts, TAGS.totalDebt);
   const shortDebt = latestInstant(facts, TAGS.shortDebt);
@@ -293,6 +341,86 @@ function extractFinancials(facts) {
   const ocfUnit = series.ocf?.unit;
   const financialCurrency = (revUnit && revUnit !== "shares") ? revUnit : (ocfUnit && ocfUnit !== "shares") ? ocfUnit : "USD";
   return { series, latest: { cash, totalDebt, shortDebt, longDebt, sharesOutstanding }, financialCurrency };
+}
+
+function htmlAttribute(attributes, name) {
+  const match = String(attributes || "").match(new RegExp(`\\b${name}\\s*=\\s*["']([^"']+)["']`, "i"));
+  return match?.[1] || null;
+}
+
+function inlineContextYears(html) {
+  const contexts = new Map();
+  const pattern = /<(?:xbrli:)?context\b[^>]*\bid=["']([^"']+)["'][^>]*>([\s\S]*?)<\/(?:xbrli:)?context>/gi;
+  for (const match of String(html || "").matchAll(pattern)) {
+    const block = match[2];
+    const start = block.match(/<(?:xbrli:)?startDate[^>]*>([^<]+)</i)?.[1]?.trim();
+    const end = block.match(/<(?:xbrli:)?endDate[^>]*>([^<]+)</i)?.[1]?.trim();
+    if (!start || !end) continue;
+    const days = (Date.parse(end) - Date.parse(start)) / 86400000;
+    if (days >= 300 && days <= 430) contexts.set(match[1], { year: Number(end.slice(0, 4)), start, end });
+  }
+  return contexts;
+}
+
+function parseInlineAnnualSbc(html, filing = {}) {
+  const contexts = inlineContextYears(html);
+  const values = new Map();
+  const accepted = new Set(TAGS.sbc.map((tag) => tag.toLowerCase()));
+  const pattern = /<ix:nonFraction\b([^>]*)>([\s\S]*?)<\/ix:nonFraction>/gi;
+  for (const match of String(html || "").matchAll(pattern)) {
+    const attributes = match[1];
+    const qualifiedName = htmlAttribute(attributes, "name") || "";
+    const tag = qualifiedName.split(":").at(-1);
+    if (!accepted.has(String(tag).toLowerCase())) continue;
+    const context = contexts.get(htmlAttribute(attributes, "contextRef"));
+    if (!context || !Number.isInteger(context.year)) continue;
+    const raw = match[2].replace(/<[^>]+>/g, "").replace(/&nbsp;|&#160;/gi, " ").replace(/,/g, "").trim();
+    const numeric = Number(raw.replace(/[()]/g, ""));
+    if (!finite(numeric)) continue;
+    const scale = Number(htmlAttribute(attributes, "scale") || 0);
+    const sign = htmlAttribute(attributes, "sign") === "-" || /^\(.*\)$/.test(raw) ? -1 : 1;
+    const val = Math.abs(numeric * (10 ** scale) * sign);
+    const existing = values.get(context.year);
+    if (!existing || tag === "AllocatedShareBasedCompensationExpense") {
+      values.set(context.year, {
+        val,
+        start: context.start,
+        end: context.end,
+        filed: filing.filed || null,
+        form: filing.form || "10-K",
+        accn: filing.accession || null,
+        taxonomy: qualifiedName.split(":")[0] || "us-gaap",
+        tag,
+        label: "Share-based compensation disclosed in the annual filing",
+        unit: "USD"
+      });
+    }
+  }
+  const first = values.values().next().value;
+  return {
+    values,
+    taxonomy: first?.taxonomy || "us-gaap",
+    tag: first?.tag || "ShareBasedCompensation",
+    label: first?.label || "Share-based compensation disclosed in the annual filing",
+    unit: "USD"
+  };
+}
+
+async function fetchLatestAnnualSbcSeries(company, submissions) {
+  if (!company?.cik) return null;
+  const recent = submissions?.filings?.recent || {};
+  const forms = recent.form || [];
+  for (let index = 0; index < forms.length; index += 1) {
+    if (!/^10-K(?:\/A)?$/.test(forms[index])) continue;
+    const accession = recent.accessionNumber?.[index];
+    const primaryDocument = recent.primaryDocument?.[index];
+    if (!accession || !primaryDocument) continue;
+    const filing = { form: forms[index], filed: recent.filingDate?.[index] || null, accession };
+    const url = `https://www.sec.gov/Archives/edgar/data/${Number(company.cik)}/${accession.replaceAll("-", "")}/${primaryDocument}`;
+    const series = parseInlineAnnualSbc(await fetchSecText(url), filing);
+    if (series.values.size) return series;
+  }
+  return null;
 }
 
 async function fetchSecUniverse() {
@@ -314,4 +442,12 @@ async function fetchSecUniverse() {
   return valid;
 }
 
-module.exports = { fetchSecCompany, extractFinancials, fetchSecUniverse, fetchRecentForm4Purchases, TAGS };
+module.exports = {
+  fetchSecCompany,
+  extractFinancials,
+  fetchSecUniverse,
+  fetchRecentForm4Purchases,
+  fetchLatestAnnualSbcSeries,
+  parseInlineAnnualSbc,
+  TAGS
+};

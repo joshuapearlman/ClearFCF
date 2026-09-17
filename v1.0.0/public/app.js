@@ -93,7 +93,10 @@ function decisionText(row, evaluation) {
   if (row.insiderClusterBuying || row.insiders?.clusterBuying) parts.push("cluster insider buying");
   else if (row.insiderBuying || row.insiders?.hasRecentBuying) parts.push("recent insider buying");
   const reason = evaluation?.exclusions?.[0] || evaluation?.failures?.[0] || evaluation?.unknowns?.[0] || "all active qualification checks passed";
-  return `${evaluation?.status || row.status}: ${parts.slice(0, 4).join(", ") || reason}.`;
+  const status = evaluation?.status || row.status;
+  const summary = `${status}: ${parts.slice(0, 4).join(", ") || reason}.`;
+  const reasons = evaluation?.reasons || [];
+  return status === "Idea" || !reasons.length ? summary : `${summary} Why not Idea: ${reasons.join("; ")}.`;
 }
 
 const STORAGE_KEY = "clear-fcf-auto-v3";
@@ -383,7 +386,7 @@ function tableHtml(results, title, statusFilter = "All", counts = {}) {
             <th class="sortable optional-metric" data-sort="capexToDnaRatio">CapEx/D&A</th>
             <th class="sortable" data-sort="usableYears">History</th>
             <th class="sortable optional-metric" data-sort="netDebtToNfcf">Net debt/nFCF</th>
-            <th class="sortable optional-metric" data-sort="latestSbcToFcf">SBC/FCF</th>
+            <th class="sortable optional-metric" data-sort="normalizedSbcToFcf">3Y SBC/FCF</th>
           </tr>
         </thead>
         <tbody>
@@ -396,8 +399,8 @@ function tableHtml(results, title, statusFilter = "All", counts = {}) {
               ${row.fcfTrajectory === 'Expanding' ? '<span class="badge badge-green" title="3-year margin expanding">Expanding</span>' : ''}
               ${row.buybackRating === 'Accretive' ? '<span class="badge badge-blue" title="Historical buybacks executed at a discount">Accretive Buyback</span>' : ''}
               ${row.insiderValueAligned ? '<span class="badge badge-blue" title="Recent disclosed insider buying overlaps with an inexpensive P/nFCF; motive is not known">Insider + Value</span>' : row.insiderBuying ? '<span class="badge badge-green" title="Recent disclosed insider purchase activity">Insider Buying</span>' : ''}
-              ${row.latestSbcToFcf && row.latestSbcToFcf > 0.25 ? '<span class="badge badge-amber" title="SBC absorbs >25% of FCF">High SBC</span>' : ''}
-              <span class="result-summary" title="${escapeHtml(row.decisionSummary || '')}">${escapeHtml(row.decisionSummary || row.primaryReason || '')}</span>
+              ${row.normalizedSbcToFcf && row.normalizedSbcToFcf > 0.25 ? '<span class="badge badge-amber" title="Recent normalized SBC absorbs >25% of normalized FCF">High SBC</span>' : ''}
+              <span class="result-summary ${row.status === "Idea" ? "" : "not-qualified"}" title="${escapeHtml(row.decisionSummary || '')}">${escapeHtml(row.status === "Idea" ? (row.decisionSummary || "Qualified as an Idea") : `Why not Idea: ${row.nonQualificationReason || row.primaryReason || "See screening details"}`)}</span>
             </td>
             <td class="col-status" title="${escapeHtml([...(row.evaluation?.exclusions || []), ...(row.evaluation?.failures || []), ...(row.evaluation?.unknowns || [])].join("\n"))}"><span class="badge ${String(row.status).toLowerCase()}">${escapeHtml(row.status)}</span></td>
             <td>${compact(row.price, true)}</td>
@@ -416,7 +419,7 @@ function tableHtml(results, title, statusFilter = "All", counts = {}) {
             <td class="optional-metric">${row.capexToDnaRatio ? `${(row.capexToDnaRatio * 100).toFixed(0)}%` : "—"}</td>
             <td>${escapeHtml(row.usableYears)} yrs</td>
             <td class="optional-metric">${multiple(row.netDebtToNfcf)}</td>
-            <td class="optional-metric">${percent(row.latestSbcToFcf)}</td>
+            <td class="optional-metric">${percent(row.normalizedSbcToFcf ?? row.latestSbcToFcf)}</td>
           </tr>`).join("")}
         </tbody>
       </table>
@@ -490,6 +493,8 @@ function applyFilterAndSort(results, statusFilter = "All") {
       status: evaluation.status,
       evaluation,
       primaryReason: evaluation.exclusions[0] || evaluation.failures[0] || evaluation.unknowns[0] || "All active qualification checks passed",
+      nonQualificationReasons: evaluation.reasons || [],
+      nonQualificationReason: (evaluation.reasons || []).join("; "),
       decisionSummary: decisionText(r, evaluation),
       passesDefaultIdeaFilter: evaluation.status === "Idea"
     };
@@ -502,7 +507,7 @@ function applyFilterAndSort(results, statusFilter = "All") {
     list = list.filter((r) => typeof r.netDebtToNfcf === 'number' && r.netDebtToNfcf < 0);
   }
   if (state.activeFilters.has('low-sbc')) {
-    list = list.filter((r) => typeof r.latestSbcToFcf === 'number' && r.latestSbcToFcf < 0.15);
+    list = list.filter((r) => typeof (r.normalizedSbcToFcf ?? r.latestSbcToFcf) === 'number' && (r.normalizedSbcToFcf ?? r.latestSbcToFcf) < 0.15);
   }
   if (state.activeFilters.has('buybacks')) {
     list = list.filter((r) => typeof r.shareChange === 'number' && r.shareChange < 0);
@@ -552,7 +557,7 @@ function renderTable(container, results, title, defaultStatus = "All") {
 }
 
 function exportCsv(results) {
-  const fields = ["ticker", "companyName", "status", "decisionSummary", "primaryReason", "price", "marketCap", "priceToNfcf", "priceToEconomicNfcf", "evToUnleveredNfcf", "fcfYield", "dividendYield", "fiveYearDividendYield", "dividendPayoutRatio", "dividendGrowth5y", "dividendYearsWithoutCut", "dividendCoverage", "shareholderYield", "buybackCashYield", "sbcYield", "netBuybackYield", "dividendRate", "exDividendDate", "insiderBuying", "insiderPurchaseCount", "insiderNetShares", "insiderAveragePurchasePrice", "insiderClusterBuying", "insiderValueAligned", "insiderSignal", "latestInsiderPurchaseDate", "valuationHistoryContext", "valuationMultiplePercentile", "drawdownFromHigh", "marketDataAsOf", "financialPeriodEnd", "economicFcfYield", "fcfTrajectory", "buybackRating", "buybackPrice", "capexToDnaRatio", "usableYears", "netDebtToNfcf", "shortDebt", "cash", "shareChange", "latestSbcToFcf"];
+  const fields = ["ticker", "companyName", "status", "nonQualificationReason", "decisionSummary", "primaryReason", "price", "marketCap", "priceToNfcf", "priceToEconomicNfcf", "evToUnleveredNfcf", "fcfYield", "dividendYield", "fiveYearDividendYield", "dividendPayoutRatio", "dividendGrowth5y", "dividendYearsWithoutCut", "dividendCoverage", "shareholderYield", "buybackCashYield", "sbcYield", "netBuybackYield", "dividendRate", "exDividendDate", "insiderBuying", "insiderPurchaseCount", "insiderNetShares", "insiderAveragePurchasePrice", "insiderClusterBuying", "insiderValueAligned", "insiderSignal", "latestInsiderPurchaseDate", "valuationHistoryContext", "valuationMultiplePercentile", "drawdownFromHigh", "marketDataAsOf", "financialPeriodEnd", "economicFcfYield", "fcfTrajectory", "buybackRating", "buybackPrice", "capexToDnaRatio", "usableYears", "netDebtToNfcf", "shortDebt", "cash", "shareChange", "shareChangeYears", "shareChangeAnnualized", "normalizedSbcToFcf", "latestSbcToFcf"];
   const quote = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
   const csv = [fields.join(","), ...results.map((row) => fields.map((key) => quote(row[key])).join(","))].join("\n");
   const link = document.createElement("a");
@@ -564,7 +569,7 @@ function exportCsv(results) {
 
 function rowTable(rows) {
   return `<div class="table-scroll"><table><thead><tr>
-    <th>Period</th><th>Revenue</th><th>OCF</th><th>CapEx</th><th>Standard FCF</th><th>SBC</th><th>Economic FCF</th><th>D&A</th><th>Diluted Shares</th>
+    <th>Period</th><th>Revenue</th><th>OCF</th><th>CapEx</th><th>Standard FCF</th><th>SBC</th><th>Economic FCF</th><th>D&A</th><th>Share count</th>
   </tr></thead><tbody>${rows.map((row) => `<tr>
     <td title="${escapeHtml(Object.entries(row.evidence || {}).filter(([, fact]) => fact?.tag).map(([key, fact]) => `${key}: ${fact.taxonomy}:${fact.tag} (${fact.form || "filing"}, filed ${fact.filed || "unknown"})`).join("\n"))}"><strong>${row.year}</strong></td>
     <td>${compact(row.revenue, true)}</td>
@@ -574,7 +579,7 @@ function rowTable(rows) {
     <td>${compact(row.sbc, true)}</td>
     <td>${compact(row.fcfEconomic, true)}</td>
     <td>${compact(row.dna, true)}</td>
-    <td>${compact(row.shares)}</td>
+    <td title="${escapeHtml(row.shareBasis === "period-end outstanding" ? "SEC period-end common shares used because annual diluted weighted-average shares were unavailable" : "Annual diluted weighted-average shares")}">${compact(row.shares)}${row.shareBasis === "period-end outstanding" ? '<small class="cell-note">Period-end fallback</small>' : ""}</td>
   </tr>`).join("")}</tbody></table></div>`;
 }
 
@@ -942,6 +947,7 @@ function renderReport(report) {
       <div><span>Evidence confidence</span><strong>${escapeHtml(report.evidenceConfidence?.level || "Unknown")}</strong></div>
     </div>
     <p class="decision-summary-text">${escapeHtml(liveDecisionSummary)}</p>
+    ${evaluation.status === "Idea" ? "" : `<div class="qualification-callout"><strong>Why this is not an Idea</strong><ul>${(evaluation.reasons || []).map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul></div>`}
     ${renderFreshness(report)}
     ${renderConcernGroups(report, evaluation)}
   </div>
