@@ -10,6 +10,14 @@ const RESEARCH_SCHEMA_VERSION = "clearfcf-deep-research/v1";
 const MAX_RESULT_BYTES = 5 * 1024 * 1024;
 const JOB_TTL_MS = 12 * 60 * 60 * 1000;
 const AUTH_CACHE_TTL_MS = 2 * 60 * 60 * 1000;
+const RESEARCH_MODELS = Object.freeze([
+  { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+  { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+  { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
+  { id: "gpt-5.5", label: "GPT-5.5" }
+]);
+const REASONING_EFFORTS = Object.freeze(["low", "medium", "high", "xhigh", "max"]);
+const DEFAULT_RESEARCH_OPTIONS = Object.freeze({ model: "gpt-5.6-sol", effort: "high" });
 
 const stringArray = { type: "array", items: { type: "string" } };
 const sourceIds = { type: "array", items: { type: "string" } };
@@ -263,6 +271,15 @@ function safeWebUrl(value) {
   }
 }
 
+function normalizeResearchOptions(value = {}) {
+  const model = String(value.model || DEFAULT_RESEARCH_OPTIONS.model).trim();
+  const effort = String(value.effort || DEFAULT_RESEARCH_OPTIONS.effort).trim().toLowerCase();
+  if (!RESEARCH_MODELS.some((item) => item.id === model)) throw new Error("Unsupported Deep Research model.");
+  if (!REASONING_EFFORTS.includes(effort)) throw new Error("Unsupported Deep Research reasoning effort.");
+  if (model === "gpt-5.5" && effort === "max") throw new Error("GPT-5.5 supports reasoning effort through xhigh, not max.");
+  return { model, effort };
+}
+
 function validateResearchResult(value, expectedTicker) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Codex returned an invalid research object.");
   if (value.schemaVersion !== RESEARCH_SCHEMA_VERSION) throw new Error("Codex returned an unsupported research schema.");
@@ -345,6 +362,8 @@ function publicJob(job) {
     message: job.message,
     progress: job.progress,
     sourceCount: job.sourceCount,
+    model: job.model,
+    effort: job.effort,
     startedAt: job.startedAt,
     updatedAt: job.updatedAt,
     completedAt: job.completedAt || null,
@@ -450,9 +469,10 @@ class CodexResearchService {
     return { started: true, url: openedUrl, message: "Complete the official ChatGPT sign-in flow in your browser." };
   }
 
-  start(report) {
+  start(report, options = {}) {
     this.pruneJobs();
     const snapshot = buildResearchSnapshot(report);
+    const researchOptions = normalizeResearchOptions(options);
     const existing = [...this.jobs.values()].find((job) => job.ticker === snapshot.ticker && !["completed", "failed", "cancelled"].includes(job.status));
     if (existing) return publicJob(existing);
 
@@ -464,6 +484,8 @@ class CodexResearchService {
       message: "Preparing ClearFCF evidence…",
       progress: 3,
       sourceCount: 0,
+      model: researchOptions.model,
+      effort: researchOptions.effort,
       startedAt: now,
       updatedAt: now,
       result: null,
@@ -498,6 +520,7 @@ class CodexResearchService {
 
       const args = [
         "exec", "--ephemeral", "--json", "--sandbox", "read-only", "--ignore-user-config", "--ignore-rules",
+        "--model", job.model, "--config", `model_reasoning_effort=${JSON.stringify(job.effort)}`,
         "--skip-git-repo-check", "-C", this.workspaceRoot, "--output-schema", schemaPath, "-o", outputPath, "-"
       ];
       const result = await this.run(args, {
@@ -576,10 +599,14 @@ class CodexResearchService {
 module.exports = {
   AUTH_CACHE_TTL_MS,
   CodexResearchService,
+  DEFAULT_RESEARCH_OPTIONS,
+  REASONING_EFFORTS,
+  RESEARCH_MODELS,
   RESEARCH_SCHEMA,
   RESEARCH_SCHEMA_VERSION,
   buildResearchPrompt,
   buildResearchSnapshot,
+  normalizeResearchOptions,
   resolveCodexCommand,
   safeWebUrl,
   validateResearchResult

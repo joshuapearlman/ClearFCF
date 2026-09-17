@@ -65,6 +65,7 @@ const state = {
   reports: {},
   researchReports: {},
   researchJobs: {},
+  researchSettings: { model: "gpt-5.6-sol", effort: "high" },
   stopped: false,
   activeFilters: new Set(),
   displayFilters: { minDividendYield: 0 },
@@ -99,6 +100,14 @@ const STORAGE_KEY = "clear-fcf-auto-v3";
 const REVIEWED_KEY = "clear-fcf-reviewed-v2";
 const PERFORMANCE_KEY = "clear-fcf-performance-v1";
 const RESEARCH_STORAGE_KEY = "clear-fcf-deep-research-v1";
+const RESEARCH_SETTINGS_KEY = "clear-fcf-research-settings-v1";
+const RESEARCH_MODELS = [
+  ["gpt-5.6-sol", "GPT-5.6 Sol"],
+  ["gpt-5.6-terra", "GPT-5.6 Terra"],
+  ["gpt-5.6-luna", "GPT-5.6 Luna"],
+  ["gpt-5.5", "GPT-5.5"]
+];
+const RESEARCH_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const DEFAULT_PERFORMANCE = { workers: 1, pacingMs: 250, frontendPauseMs: 400, batchSize: 8 };
 const PERFORMANCE_FIELDS = {
   workers: { selector: "#scan-workers", min: 1, max: 8 },
@@ -220,6 +229,18 @@ function loadSavedResearch() {
   }
 }
 
+function loadResearchSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(RESEARCH_SETTINGS_KEY)) || {};
+    if (RESEARCH_MODELS.some(([id]) => id === saved.model)) state.researchSettings.model = saved.model;
+    if (RESEARCH_EFFORTS.includes(saved.effort)) state.researchSettings.effort = saved.effort;
+  } catch {}
+}
+
+function saveResearchSettings() {
+  try { localStorage.setItem(RESEARCH_SETTINGS_KEY, JSON.stringify(state.researchSettings)); } catch {}
+}
+
 function saveResearchReport(ticker, report) {
   state.researchReports[ticker] = report;
   const entries = Object.entries(state.researchReports)
@@ -230,6 +251,7 @@ function saveResearchReport(ticker, report) {
 }
 
 loadSavedResearch();
+loadResearchSettings();
 
 function setStatus(message, error = false) {
   const el = $("#status");
@@ -762,6 +784,23 @@ function renderValuationCase(label, value, sources) {
   </article>`;
 }
 
+function researchSettingsMarkup() {
+  const modelOptions = RESEARCH_MODELS.map(([id, label]) => `<option value="${escapeHtml(id)}"${state.researchSettings.model === id ? " selected" : ""}>${escapeHtml(label)}</option>`).join("");
+  const effortOptions = researchEffortOptions();
+  return `<div class="research-config" aria-label="Deep Research settings">
+    <label><span>Model</span><select class="research-model-select">${modelOptions}</select></label>
+    <label><span>Effort</span><select class="research-effort-select">${effortOptions}</select></label>
+  </div>`;
+}
+
+function allowedResearchEfforts(model = state.researchSettings.model) {
+  return model === "gpt-5.5" ? RESEARCH_EFFORTS.filter((effort) => effort !== "max") : RESEARCH_EFFORTS;
+}
+
+function researchEffortOptions() {
+  return allowedResearchEfforts().map((effort) => `<option value="${effort}"${state.researchSettings.effort === effort ? " selected" : ""}>${effort === "xhigh" ? "Extra high" : effort[0].toUpperCase() + effort.slice(1)}</option>`).join("");
+}
+
 function renderResearchResult(result) {
   const sources = researchSourceMap(result);
   const history = result.financialHistory || {};
@@ -777,7 +816,7 @@ function renderResearchResult(result) {
       <div>
         <p class="kicker">AI-assisted, source-linked investigation</p>
         <h3>Deep Research</h3>
-        <p class="muted">Generated ${escapeHtml(result.generatedAt ? new Date(result.generatedAt).toLocaleString() : "date unavailable")}. Verify consequential claims in the linked originals.</p>
+        <p class="muted">Generated ${escapeHtml(result.generatedAt ? new Date(result.generatedAt).toLocaleString() : "date unavailable")}${result.researchConfiguration ? ` with ${escapeHtml(result.researchConfiguration.model)} at ${escapeHtml(result.researchConfiguration.effort)} effort` : ""}. Verify consequential claims in the linked originals.</p>
       </div>
       <div class="research-verdicts">
         <span class="research-classification">${escapeHtml(result.classification || "Insufficient evidence")}</span>
@@ -847,6 +886,7 @@ function renderResearchPanel(ticker) {
     return `<div class="report-card deep-research-progress ${failed ? "research-failed" : ""}">
       <div class="research-progress-head"><div><p class="kicker">Deep Research</p><h3>${escapeHtml(job.message || "Preparing research…")}</h3></div><strong>${escapeHtml(job.progress || 0)}%</strong></div>
       <div class="research-progress-track"><span style="width:${Math.max(0, Math.min(100, Number(job.progress) || 0))}%"></span></div>
+      ${job.model ? `<p class="research-run-config">${escapeHtml(job.model)} • ${escapeHtml(job.effort || "default")} effort</p>` : ""}
       ${job.error ? `<p class="research-error">${escapeHtml(job.error)}</p>` : `<p class="muted">${job.status === "signing-in" ? "Finish signing in with ChatGPT in the browser window." : "This can take several minutes. You can continue using ClearFCF while it runs."}</p>`}
       ${job.loginUrl ? `<a class="source-link" href="${escapeHtml(job.loginUrl)}" target="_blank" rel="noopener">Continue ChatGPT sign-in ↗</a>` : ""}
       ${failed ? `<button class="secondary deep-research-btn" data-ticker="${escapeHtml(ticker)}" type="button">Try again</button>` : `<button class="secondary research-cancel-btn" data-job-id="${escapeHtml(job.id || "")}" data-ticker="${escapeHtml(ticker)}" type="button">Cancel research</button>`}
@@ -889,8 +929,9 @@ function renderReport(report) {
         </div>
       </div>
       <div class="report-actions">
+        ${researchSettingsMarkup()}
         <button type="button" class="btn primary deep-research-btn" data-ticker="${escapeHtml(report.ticker)}">✦ ${state.researchReports[report.ticker] ? "Refresh Research" : "Deep Research"}</button>
-        <button type="button" class="btn secondary memo-btn">📄 Print Memo</button>
+        <button type="button" class="btn secondary memo-btn" data-ticker="${escapeHtml(report.ticker)}">↓ Save PDF</button>
         <span class="badge ${String(evaluation.status).toLowerCase()}">${escapeHtml(evaluation.status)}</span>
       </div>
     </div>
@@ -1674,7 +1715,10 @@ async function pollResearchJob(ticker, jobId) {
     state.researchJobs[ticker] = job;
     updateResearchPanel(ticker);
     if (job.status === "completed") {
-      saveResearchReport(ticker, job.result);
+      saveResearchReport(ticker, {
+        ...job.result,
+        researchConfiguration: { model: job.model, effort: job.effort }
+      });
       delete state.researchJobs[ticker];
       updateResearchPanel(ticker);
       setStatus(`${ticker} deep research complete.`);
@@ -1704,7 +1748,11 @@ async function startDeepResearch(ticker) {
     const job = await request("/api/research?action=start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ report })
+      body: JSON.stringify({
+        report,
+        model: state.researchSettings.model,
+        effort: state.researchSettings.effort
+      })
     });
     state.researchJobs[ticker] = job;
     updateResearchPanel(ticker);
@@ -1733,6 +1781,45 @@ async function cancelDeepResearch(ticker, jobId) {
   }
 }
 
+async function saveReportPdf(ticker, button) {
+  if (!window.clearFcfDesktop?.saveReportPdf) {
+    setStatus("PDF export is available in the ClearFCF desktop app.", true);
+    return;
+  }
+  const originalText = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Creating PDF…";
+  }
+  document.body.classList.add("pdf-exporting");
+  try {
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const result = await window.clearFcfDesktop.saveReportPdf({ ticker });
+    if (result?.saved) setStatus(`${ticker} report saved as a PDF.`);
+    else setStatus("PDF export cancelled.");
+  } catch (error) {
+    setStatus(error.message || "The PDF could not be created.", true);
+  } finally {
+    document.body.classList.remove("pdf-exporting");
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+}
+
+$("#report")?.addEventListener("change", (event) => {
+  if (event.target.matches(".research-model-select")) {
+    state.researchSettings.model = event.target.value;
+    if (!allowedResearchEfforts().includes(state.researchSettings.effort)) state.researchSettings.effort = "xhigh";
+    const effortSelect = event.currentTarget.querySelector(".research-effort-select");
+    if (effortSelect) effortSelect.innerHTML = researchEffortOptions();
+  }
+  else if (event.target.matches(".research-effort-select")) state.researchSettings.effort = event.target.value;
+  else return;
+  saveResearchSettings();
+});
+
 $("#report")?.addEventListener("click", (event) => {
   const researchButton = event.target.closest(".deep-research-btn[data-ticker]");
   if (researchButton) {
@@ -1744,8 +1831,9 @@ $("#report")?.addEventListener("click", (event) => {
     void cancelDeepResearch(cancelButton.dataset.ticker, cancelButton.dataset.jobId);
     return;
   }
-  if (event.target.closest(".memo-btn")) {
-    window.print();
+  const memoButton = event.target.closest(".memo-btn[data-ticker]");
+  if (memoButton) {
+    void saveReportPdf(memoButton.dataset.ticker, memoButton);
     return;
   }
   const tile = event.target.closest(".metric.clickable[data-metric]");

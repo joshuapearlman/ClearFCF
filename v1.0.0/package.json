@@ -46,6 +46,7 @@
       "public/**/*",
       "desktop-server.js",
       "electron-main.js",
+      "preload.js",
       "server.js",
       "package.json"
     ],

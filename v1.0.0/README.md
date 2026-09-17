@@ -53,7 +53,8 @@ The `.github/workflows/mac-release.yml` workflow runs on `v*` tags, builds the M
 - **Shareholder Yield**: Combines dividend cash, gross repurchases, and the economic cost of stock compensation
 - **Insider Purchase Evidence**: Open-market purchase signals in screening summaries plus recent SEC Form 4 evidence in full reports
 - **Historical Valuation Context**: Five-year reported P/FCF observations, percentile context, and 52-week drawdown
-- **ChatGPT-Connected Deep Research (Mac/Desktop)**: Uses the bundled Codex CLI and your ChatGPT sign-in to investigate why a stock may be cheap, current developments, long-term financial history, accounting risks, peers, catalysts, and valuation scenarios with linked sources; no API key required
+- **Configurable ChatGPT-Connected Deep Research (Mac/Desktop)**: Choose GPT-5.6 Sol, Terra, Luna, or GPT-5.5 plus low through max reasoning effort, then use your ChatGPT sign-in to investigate why a stock may be cheap, current developments, long-term financial history, accounting risks, peers, catalysts, and valuation scenarios with linked sources; no API key required
+- **Complete PDF Reports (Mac/Desktop)**: Save the entire company analysis, including completed Deep Research, directly to a paginated PDF instead of using the system print dialog
 - **Complete Result Funnel**: Separate Idea, Review, Excluded, and All tabs retain near-misses and missing-data cases
 - **Decision Explanations & Freshness**: Plain-language result summaries with market, filing-period, and insider-activity dates
 - Detailed single-company reports and calculation audits
@@ -65,6 +66,8 @@ The `.github/workflows/mac-release.yml` workflow runs on `v*` tags, builds the M
 
 ## Deep Research
 
-Open a company in **Analyze Stock**, then select **Deep Research**. ClearFCF checks the bundled Codex CLI, opens the official ChatGPT browser sign-in when needed, and runs an ephemeral read-only research job. The structured result is validated before display and saved locally for the ten most recently researched tickers.
+Open a company in **Analyze Stock**, choose the model and reasoning effort beside the research button, then select **Deep Research**. ClearFCF checks the bundled Codex CLI, opens the official ChatGPT browser sign-in when needed, and runs an ephemeral read-only research job using those explicit settings. The structured result is validated before display and saved locally for the ten most recently researched tickers.
+
+Select **Save PDF** to choose a destination and export the complete currently displayed analysis. The PDF uses a dedicated A4 layout and includes completed Deep Research and its linked source list.
 
 Deep Research is intentionally desktop/local-only because it launches a local executable and reuses locally cached Codex authentication. Hosted Vercel screening continues to work, but its research endpoint returns a desktop-only message. Research output is an aid, not investment advice; verify consequential claims in the linked original sources.

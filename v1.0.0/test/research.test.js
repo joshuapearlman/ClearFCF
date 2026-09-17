@@ -3,9 +3,12 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
+  CodexResearchService,
+  DEFAULT_RESEARCH_OPTIONS,
   RESEARCH_SCHEMA_VERSION,
   buildResearchPrompt,
   buildResearchSnapshot,
+  normalizeResearchOptions,
   safeWebUrl,
   validateResearchResult
 } = require("../lib/research");
@@ -83,4 +86,21 @@ test("research validation accepts HTTPS sources and rejects unsafe source sets",
   invalid.sources[0].url = "javascript:alert(1)";
   assert.throws(() => validateResearchResult(invalid, "TEST"), /valid HTTPS sources/);
   assert.equal(safeWebUrl("http://example.com"), null);
+});
+
+test("research model and effort choices are validated and attached to jobs", () => {
+  assert.deepEqual(normalizeResearchOptions(), DEFAULT_RESEARCH_OPTIONS);
+  assert.deepEqual(normalizeResearchOptions({ model: "gpt-5.6-terra", effort: "xhigh" }), {
+    model: "gpt-5.6-terra",
+    effort: "xhigh"
+  });
+  assert.throws(() => normalizeResearchOptions({ model: "unknown" }), /Unsupported Deep Research model/);
+  assert.throws(() => normalizeResearchOptions({ effort: "infinite" }), /Unsupported Deep Research reasoning effort/);
+  assert.throws(() => normalizeResearchOptions({ model: "gpt-5.5", effort: "max" }), /through xhigh/);
+
+  const service = new CodexResearchService();
+  service.execute = async () => {};
+  const job = service.start(sampleReport(), { model: "gpt-5.5", effort: "medium" });
+  assert.equal(job.model, "gpt-5.5");
+  assert.equal(job.effort, "medium");
 });

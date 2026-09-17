@@ -566,8 +566,12 @@ tbody tr:hover { background: var(--green-tint); box-shadow: inset 4px 0 0 var(--
 .report-card h2, .report-card h3 { font-family: var(--serif); font-weight: 500; margin: 0 0 5px; letter-spacing: -0.01em; }
 .report-card h3 { font-size: 19px; }
 .report-title { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
-.report-actions { display: flex; align-items: center; gap: 8px; }
+.report-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; max-width: 590px; }
 .memo-btn { padding: 7px 12px; font-size: 12px; }
+.research-config { display: flex; align-items: flex-end; gap: 6px; }
+.research-config label { display: grid; gap: 3px; color: var(--muted); font: 700 8px var(--mono); letter-spacing: 0.05em; text-transform: uppercase; }
+.research-config select { height: 31px; min-width: 112px; padding: 4px 25px 4px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-s); background-color: var(--card); color: var(--ink); font: 11px var(--mono); }
+.research-config label:first-child select { min-width: 130px; }
 .report-summary { border-top: 4px solid var(--green); box-shadow: 0 10px 26px rgba(26, 35, 31, 0.08); }
 .decision-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; overflow: hidden; margin-top: 20px; border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--line); }
 .decision-strip > div { padding: 13px 15px; background: var(--paper-2); }
@@ -618,6 +622,7 @@ tbody tr:hover { background: var(--green-tint); box-shadow: inset 4px 0 0 var(--
 .research-progress-head > strong { color: var(--blue); font: 500 25px var(--serif); }
 .research-progress-track { height: 7px; margin: 16px 0 12px; overflow: hidden; border-radius: 99px; background: var(--line); }
 .research-progress-track span { display: block; height: 100%; border-radius: inherit; background: var(--blue); transition: width 300ms var(--ease-out); }
+.research-run-config { margin: 0 0 8px; color: var(--muted); font: 600 10px var(--mono); }
 .research-error { color: var(--red); font-weight: 600; }
 .deep-research-progress button { margin-top: 12px; }
 .deep-research-card { padding: 0; overflow: hidden; border-top: 4px solid var(--blue); }
@@ -850,25 +855,46 @@ tbody tr:hover { background: var(--green-tint); box-shadow: inset 4px 0 0 var(--
   .report-section-heading > small { display: none; }
 }
 
-/* ---------- printable one-page memo ---------- */
+/* ---------- complete PDF report ---------- */
 @media print {
-  body { background: white !important; color: black !important; font-size: 10pt !important; background-image: none !important; }
-  .site-header, .app-footer, #status, nav, .finder-panel, .seen-bar, .filter-chips, .toolbar-panel, .memo-btn, .deep-research-btn, .deep-research-slot, #cmd-palette, .nav-button, .cmd-hint, .tolerances-drawer, .scan-dashboard, .report-section-heading {
+  @page { size: A4; margin: 11mm; }
+  html, body { height: auto !important; min-height: 0 !important; overflow: visible !important; }
+  body { display: block !important; background: white !important; color: black !important; font-size: 10pt !important; background-image: none !important; }
+  .site-header, .app-footer, #status, nav, .finder-panel, .seen-bar, .filter-chips, .toolbar-panel, .memo-btn, .deep-research-btn, .research-config, #cmd-palette, .nav-button, .cmd-hint, .tolerances-drawer, .scan-dashboard {
     display: none !important;
   }
   main { padding: 0 !important; max-width: 100% !important; margin: 0 !important; }
   .view { display: none !important; }
-  #analyze.view { display: block !important; }
+  #analyze.view { display: block !important; animation: none !important; transform: none !important; filter: none !important; }
   .compact-panel { display: none !important; }
+  #report { width: 100% !important; overflow: visible !important; animation: none !important; transform: none !important; }
+  .report-section-heading { margin-top: 18px !important; break-after: avoid; }
   .report-card, .metric {
     box-shadow: none !important;
     border: 1px solid #ddd !important;
-    break-inside: avoid;
     padding: 12px !important;
     margin-top: 10px !important;
   }
+  .report-card { break-inside: auto; }
+  .report-summary, .metric { break-inside: avoid; }
+  .deep-research-slot { display: block !important; margin-top: 10px !important; }
+  .deep-research-intro, .deep-research-progress { display: none !important; }
+  .deep-research-card { padding: 0 !important; overflow: visible !important; break-inside: auto !important; }
+  .research-header, .research-lede, .research-limitations { break-inside: avoid; }
+  .research-section { break-inside: auto; }
+  .research-header, .research-section { padding: 12px !important; }
+  .research-lede > div { padding: 12px !important; }
+  .why-cheap-grid, .research-two-column, .research-three-column, .research-cases { gap: 7px !important; }
+  .table-wrap, .table-scroll { overflow: visible !important; }
+  table { width: 100% !important; table-layout: fixed; font-size: 7pt !important; }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; }
+  th, td { overflow-wrap: anywhere; white-space: normal !important; }
+  .research-financial-table { min-width: 0 !important; }
+  .research-sources ol { columns: 1 !important; }
   .report-grid { grid-template-columns: repeat(4, 1fr) !important; gap: 1px !important; margin: 8px 0 !important; }
   .metric strong { font-size: 16pt !important; }
+  a { color: inherit !important; text-decoration: none !important; }
 }
 
 /* ---------- calculation modal ---------- */

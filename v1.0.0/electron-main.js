@@ -1,12 +1,37 @@
 "use strict";
 
-const { app, BrowserWindow, dialog, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const http = require("node:http");
+const fsp = require("node:fs/promises");
+const path = require("node:path");
 
 const server = require("./desktop-server");
 
 let mainWindow;
+
+ipcMain.handle("clearfcf:save-report-pdf", async (event, options = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {
+    throw new Error("PDF export is unavailable for this window.");
+  }
+  const ticker = String(options.ticker || "stock").toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 16) || "stock";
+  const defaultPath = path.join(app.getPath("documents"), `ClearFCF-${ticker}-${new Date().toISOString().slice(0, 10)}.pdf`);
+  const selection = await dialog.showSaveDialog(mainWindow, {
+    title: "Save ClearFCF report as PDF",
+    defaultPath,
+    filters: [{ name: "PDF documents", extensions: ["pdf"] }]
+  });
+  if (selection.canceled || !selection.filePath) return { saved: false };
+
+  const pdf = await event.sender.printToPDF({
+    printBackground: true,
+    preferCSSPageSize: true,
+    pageSize: "A4",
+    margins: { top: 0.4, bottom: 0.45, left: 0.4, right: 0.4 }
+  });
+  await fsp.writeFile(selection.filePath, pdf);
+  return { saved: true, filePath: selection.filePath };
+});
 
 function waitForServer(url, timeoutMs = 15000) {
   const startedAt = Date.now();
@@ -53,6 +78,7 @@ async function createWindow() {
       title: "ClearFCF",
       backgroundColor: "#ffffff",
       webPreferences: {
+        preload: path.join(__dirname, "preload.js"),
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true

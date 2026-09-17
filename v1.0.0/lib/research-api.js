@@ -18,7 +18,10 @@ async function handler(req, res) {
       return res.status(202).json(await service.login());
     }
     if (req.method === "POST" && action === "start") {
-      return res.status(202).json(service.start(req.body?.report));
+      return res.status(202).json(service.start(req.body?.report, {
+        model: req.body?.model,
+        effort: req.body?.effort
+      }));
     }
     if (req.method === "GET" && action === "job") {
       const job = service.get(String(req.query?.id || ""));
