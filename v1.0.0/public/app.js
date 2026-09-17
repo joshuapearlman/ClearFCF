@@ -63,6 +63,8 @@ const PRESETS = {
 const state = {
   auto: null,
   reports: {},
+  researchReports: {},
+  researchJobs: {},
   stopped: false,
   activeFilters: new Set(),
   displayFilters: { minDividendYield: 0 },
@@ -96,6 +98,7 @@ function decisionText(row, evaluation) {
 const STORAGE_KEY = "clear-fcf-auto-v3";
 const REVIEWED_KEY = "clear-fcf-reviewed-v2";
 const PERFORMANCE_KEY = "clear-fcf-performance-v1";
+const RESEARCH_STORAGE_KEY = "clear-fcf-deep-research-v1";
 const DEFAULT_PERFORMANCE = { workers: 1, pacingMs: 250, frontendPauseMs: 400, batchSize: 8 };
 const PERFORMANCE_FIELDS = {
   workers: { selector: "#scan-workers", min: 1, max: 8 },
@@ -207,6 +210,26 @@ function resetReviewedHistory() {
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 }
+
+function loadSavedResearch() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(RESEARCH_STORAGE_KEY)) || {};
+    if (saved && typeof saved === "object" && !Array.isArray(saved)) state.researchReports = saved;
+  } catch {
+    state.researchReports = {};
+  }
+}
+
+function saveResearchReport(ticker, report) {
+  state.researchReports[ticker] = report;
+  const entries = Object.entries(state.researchReports)
+    .sort((a, b) => String(b[1]?.generatedAt || "").localeCompare(String(a[1]?.generatedAt || "")))
+    .slice(0, 10);
+  state.researchReports = Object.fromEntries(entries);
+  try { localStorage.setItem(RESEARCH_STORAGE_KEY, JSON.stringify(state.researchReports)); } catch {}
+}
+
+loadSavedResearch();
 
 function setStatus(message, error = false) {
   const el = $("#status");
@@ -704,6 +727,143 @@ function renderFreshness(report) {
   </div>`;
 }
 
+function researchArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function researchText(value) {
+  return escapeHtml(value || "Unavailable").replace(/\n/g, "<br>");
+}
+
+function researchList(items, empty = "No material items identified.") {
+  const values = researchArray(items).filter(Boolean);
+  if (!values.length) return `<p class="research-empty">${escapeHtml(empty)}</p>`;
+  return `<ul>${values.map((item) => `<li>${researchText(item)}</li>`).join("")}</ul>`;
+}
+
+function researchSourceMap(result) {
+  return new Map(researchArray(result?.sources).map((source) => [source.id, source]));
+}
+
+function researchCitations(ids, sources) {
+  const links = researchArray(ids).map((id) => sources.get(id)).filter(Boolean);
+  if (!links.length) return "";
+  return `<span class="research-citations">${links.map((source) => `<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener" title="${escapeHtml(source.title)}">${escapeHtml(source.id)}</a>`).join("")}</span>`;
+}
+
+function renderValuationCase(label, value, sources) {
+  const item = value || {};
+  return `<article class="research-case research-case-${label.toLowerCase()}">
+    <span>${escapeHtml(label)} case</span>
+    <strong>${researchText(item.estimatedValue)}</strong>
+    ${researchList(item.assumptions, "No assumptions supplied.")}
+    <p>${researchText(item.interpretation)}</p>
+    ${researchCitations(item.sourceIds, sources)}
+  </article>`;
+}
+
+function renderResearchResult(result) {
+  const sources = researchSourceMap(result);
+  const history = result.financialHistory || {};
+  const rows = researchArray(history.annualFinancials);
+  const recent = researchArray(result.recentDevelopments);
+  const risks = researchArray(result.accountingAndCashFlowRisks);
+  const business = result.business || {};
+  const management = result.managementAndCapitalAllocation || {};
+  const industry = result.industryAndPeers || {};
+
+  return `<div class="report-card deep-research-card">
+    <div class="research-header">
+      <div>
+        <p class="kicker">AI-assisted, source-linked investigation</p>
+        <h3>Deep Research</h3>
+        <p class="muted">Generated ${escapeHtml(result.generatedAt ? new Date(result.generatedAt).toLocaleString() : "date unavailable")}. Verify consequential claims in the linked originals.</p>
+      </div>
+      <div class="research-verdicts">
+        <span class="research-classification">${escapeHtml(result.classification || "Insufficient evidence")}</span>
+        <span>${escapeHtml(result.confidence || "Low")} confidence</span>
+      </div>
+    </div>
+
+    <div class="research-lede">
+      <div><span>Executive conclusion</span><p>${researchText(result.executiveSummary)}</p></div>
+      <div><span>Investment thesis</span><p>${researchText(result.investmentThesis)}</p></div>
+    </div>
+
+    <section class="research-section">
+      <h4>Why the stock may be cheap</h4>
+      <div class="why-cheap-grid">${researchArray(result.whyCheap).map((item, index) => `<article>
+        <span class="research-number">0${index + 1}</span>
+        <h5>${researchText(item.hypothesis)}</h5>
+        <div class="evidence-columns"><div><b>Evidence for</b>${researchList(item.evidenceFor)}</div><div><b>Evidence against</b>${researchList(item.evidenceAgainst)}</div></div>
+        <p><strong>Assessment:</strong> ${researchText(item.assessment)}</p>
+        ${researchCitations(item.sourceIds, sources)}
+      </article>`).join("") || '<p class="research-empty">No supported explanation was found.</p>'}</div>
+    </section>
+
+    <section class="research-section research-two-column">
+      <div><h4>Business quality</h4><p>${researchText(business.overview)}</p><h5>Revenue drivers</h5>${researchList(business.revenueDrivers)}<h5>Competitive advantages</h5>${researchList(business.competitiveAdvantages)}<h5>Vulnerabilities</h5>${researchList(business.vulnerabilities)}${researchCitations(business.sourceIds, sources)}</div>
+      <div><h4>Industry and peers</h4><p>${researchText(industry.industryContext)}</p>${researchList(industry.peerComparison, "No reliable peer comparison was available.")}${researchCitations(industry.sourceIds, sources)}<h4>Management and capital allocation</h4><p>${researchText(management.assessment)}</p><h5>Strengths</h5>${researchList(management.strengths)}<h5>Concerns</h5>${researchList(management.concerns)}${researchCitations(management.sourceIds, sources)}</div>
+    </section>
+
+    <section class="research-section">
+      <h4>Long-term financial history</h4>
+      <p>${researchText(history.summary)}</p>
+      ${researchList(history.trendFlags, "No material trend flags identified.")}
+      ${rows.length ? `<div class="table-wrap"><table class="research-financial-table"><thead><tr><th>Year</th><th>Revenue</th><th>Operating CF</th><th>CapEx</th><th>FCF</th><th>Diluted shares</th><th>Debt</th><th>Cash</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${escapeHtml(row.year)}</td><td>${researchText(row.revenue)}</td><td>${researchText(row.operatingCashFlow)}</td><td>${researchText(row.capitalExpenditures)}</td><td>${researchText(row.freeCashFlow)}</td><td>${researchText(row.dilutedShares)}</td><td>${researchText(row.debt)}</td><td>${researchText(row.cash)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="research-empty">No additional verified annual history was available.</p>'}
+      ${researchCitations(history.sourceIds, sources)}
+    </section>
+
+    <section class="research-section research-two-column">
+      <div><h4>Recent developments</h4>${recent.length ? `<ol class="research-timeline">${recent.map((item) => `<li><time>${escapeHtml(item.date)}</time><strong>${researchText(item.title)}</strong><p>${researchText(item.impact)}</p>${researchCitations(item.sourceIds, sources)}</li>`).join("")}</ol>` : '<p class="research-empty">No material recent developments were verified.</p>'}</div>
+      <div><h4>Accounting and cash-flow risks</h4>${risks.length ? `<div class="research-risk-list">${risks.map((item) => `<article><span class="risk-${String(item.severity || "low").toLowerCase()}">${escapeHtml(item.severity)}</span><strong>${researchText(item.risk)}</strong><p>${researchText(item.evidence)}</p>${researchCitations(item.sourceIds, sources)}</article>`).join("")}</div>` : '<p class="research-empty">No material accounting flags were verified.</p>'}</div>
+    </section>
+
+    <section class="research-section">
+      <h4>Valuation scenarios</h4>
+      <div class="research-cases">${renderValuationCase("Bear", result.valuationCases?.bear, sources)}${renderValuationCase("Base", result.valuationCases?.base, sources)}${renderValuationCase("Bull", result.valuationCases?.bull, sources)}</div>
+    </section>
+
+    <section class="research-section research-three-column">
+      <div><h4>Catalysts</h4>${researchList(result.catalysts)}</div>
+      <div><h4>Thesis breakers</h4>${researchList(result.thesisBreakers)}</div>
+      <div><h4>Unanswered questions</h4>${researchList(result.unansweredQuestions)}</div>
+    </section>
+
+    ${researchArray(result.limitations).length ? `<section class="research-limitations"><strong>Research limitations</strong>${researchList(result.limitations)}</section>` : ""}
+
+    <section class="research-section research-sources">
+      <h4>Sources</h4>
+      <ol>${researchArray(result.sources).map((source) => `<li id="research-source-${escapeHtml(source.id)}"><a href="${escapeHtml(source.url)}" target="_blank" rel="noopener">${escapeHtml(source.title)}</a><span>${escapeHtml(source.publisher)} • ${escapeHtml(source.publishedAt || "date unavailable")} • ${escapeHtml(source.sourceType)}</span></li>`).join("")}</ol>
+    </section>
+  </div>`;
+}
+
+function renderResearchPanel(ticker) {
+  const job = state.researchJobs[ticker];
+  const result = state.researchReports[ticker];
+  if (job && !["completed"].includes(job.status)) {
+    const failed = ["failed", "cancelled"].includes(job.status);
+    return `<div class="report-card deep-research-progress ${failed ? "research-failed" : ""}">
+      <div class="research-progress-head"><div><p class="kicker">Deep Research</p><h3>${escapeHtml(job.message || "Preparing research…")}</h3></div><strong>${escapeHtml(job.progress || 0)}%</strong></div>
+      <div class="research-progress-track"><span style="width:${Math.max(0, Math.min(100, Number(job.progress) || 0))}%"></span></div>
+      ${job.error ? `<p class="research-error">${escapeHtml(job.error)}</p>` : `<p class="muted">${job.status === "signing-in" ? "Finish signing in with ChatGPT in the browser window." : "This can take several minutes. You can continue using ClearFCF while it runs."}</p>`}
+      ${job.loginUrl ? `<a class="source-link" href="${escapeHtml(job.loginUrl)}" target="_blank" rel="noopener">Continue ChatGPT sign-in ↗</a>` : ""}
+      ${failed ? `<button class="secondary deep-research-btn" data-ticker="${escapeHtml(ticker)}" type="button">Try again</button>` : `<button class="secondary research-cancel-btn" data-job-id="${escapeHtml(job.id || "")}" data-ticker="${escapeHtml(ticker)}" type="button">Cancel research</button>`}
+    </div>`;
+  }
+  if (result) return renderResearchResult(result);
+  return `<div class="report-card deep-research-intro">
+    <div><p class="kicker">Optional second-stage investigation</p><h3>Research what the numbers cannot explain</h3><p>Uses your ChatGPT-connected Codex session to investigate filings, current developments, competitive risks, why the stock may be cheap, and bear/base/bull scenarios with linked sources.</p></div>
+    <span>Read-only • Source-linked • No API key</span>
+  </div>`;
+}
+
+function updateResearchPanel(ticker) {
+  const slot = document.querySelector(`.deep-research-slot[data-ticker="${CSS.escape(ticker)}"]`);
+  if (slot) slot.innerHTML = renderResearchPanel(ticker);
+}
+
 function renderReport(report) {
   const evaluation = screening.evaluateCandidate(report, state.criteria);
   const lookback = screening.lookbackKey(state.criteria);
@@ -729,6 +889,7 @@ function renderReport(report) {
         </div>
       </div>
       <div class="report-actions">
+        <button type="button" class="btn primary deep-research-btn" data-ticker="${escapeHtml(report.ticker)}">✦ ${state.researchReports[report.ticker] ? "Refresh Research" : "Deep Research"}</button>
         <button type="button" class="btn secondary memo-btn">📄 Print Memo</button>
         <span class="badge ${String(evaluation.status).toLowerCase()}">${escapeHtml(evaluation.status)}</span>
       </div>
@@ -743,6 +904,8 @@ function renderReport(report) {
     ${renderFreshness(report)}
     ${renderConcernGroups(report, evaluation)}
   </div>
+
+  <div class="deep-research-slot" data-ticker="${escapeHtml(report.ticker)}">${renderResearchPanel(report.ticker)}</div>
 
   <div class="report-section-heading"><div><span>01</span><div><p class="kicker">Decision metrics</p><h3>Valuation and cash-flow quality</h3></div></div><small>Click any metric to inspect its calculation</small></div>
   <div class="report-grid core-metrics">
@@ -1476,7 +1639,111 @@ function openCalculationModal(metric, report) {
   modal.classList.remove("hidden");
 }
 
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function ensureResearchAuthentication(ticker) {
+  const status = await request(`/api/research?action=status&_t=${Date.now()}`);
+  if (!status.available) throw new Error(status.message || "Codex is unavailable in this ClearFCF installation.");
+  if (status.authenticated) return;
+
+  const login = await request("/api/research?action=login", { method: "POST" });
+  state.researchJobs[ticker] = {
+    status: "signing-in",
+    message: "Waiting for ChatGPT sign-in…",
+    progress: 5,
+    loginUrl: login.url || null
+  };
+  updateResearchPanel(ticker);
+  setStatus("Complete the ChatGPT sign-in flow in your browser.");
+
+  for (let attempt = 0; attempt < 90; attempt += 1) {
+    await wait(2000);
+    const refreshed = await request(`/api/research?action=status&force=1&_t=${Date.now()}`);
+    if (refreshed.authenticated) return;
+  }
+  throw new Error("ChatGPT sign-in was not completed within three minutes. Try Deep Research again when ready.");
+}
+
+async function pollResearchJob(ticker, jobId) {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
+    await wait(2000);
+    if (state.researchJobs[ticker]?.id && state.researchJobs[ticker].id !== jobId) return;
+    const job = await request(`/api/research?action=job&id=${encodeURIComponent(jobId)}&_t=${Date.now()}`);
+    state.researchJobs[ticker] = job;
+    updateResearchPanel(ticker);
+    if (job.status === "completed") {
+      saveResearchReport(ticker, job.result);
+      delete state.researchJobs[ticker];
+      updateResearchPanel(ticker);
+      setStatus(`${ticker} deep research complete.`);
+      return;
+    }
+    if (["failed", "cancelled"].includes(job.status)) {
+      setStatus(job.error || job.message || "Deep research stopped.", job.status === "failed");
+      return;
+    }
+  }
+  state.researchJobs[ticker] = { status: "failed", message: "Research timed out.", progress: 0, error: "The research job did not finish within twenty minutes." };
+  updateResearchPanel(ticker);
+}
+
+async function startDeepResearch(ticker) {
+  const report = state.reports[ticker];
+  if (!report) return setStatus("Load a company report before starting deep research.", true);
+  const current = state.researchJobs[ticker];
+  if (current && !["failed", "cancelled"].includes(current.status)) return;
+
+  state.researchJobs[ticker] = { status: "authenticating", message: "Checking ChatGPT connection…", progress: 3 };
+  updateResearchPanel(ticker);
+  try {
+    await ensureResearchAuthentication(ticker);
+    state.researchJobs[ticker] = { status: "queued", message: "Preparing ClearFCF evidence…", progress: 7 };
+    updateResearchPanel(ticker);
+    const job = await request("/api/research?action=start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ report })
+    });
+    state.researchJobs[ticker] = job;
+    updateResearchPanel(ticker);
+    setStatus(`${ticker} deep research is running.`);
+    await pollResearchJob(ticker, job.id);
+  } catch (error) {
+    state.researchJobs[ticker] = { status: "failed", message: "Deep research could not start.", progress: 0, error: error.message };
+    updateResearchPanel(ticker);
+    setStatus(error.message, true);
+  }
+}
+
+async function cancelDeepResearch(ticker, jobId) {
+  if (!jobId) return;
+  try {
+    const job = await request("/api/research?action=cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: jobId })
+    });
+    state.researchJobs[ticker] = job;
+    updateResearchPanel(ticker);
+    setStatus(`${ticker} research cancelled.`);
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
 $("#report")?.addEventListener("click", (event) => {
+  const researchButton = event.target.closest(".deep-research-btn[data-ticker]");
+  if (researchButton) {
+    void startDeepResearch(researchButton.dataset.ticker);
+    return;
+  }
+  const cancelButton = event.target.closest(".research-cancel-btn[data-job-id]");
+  if (cancelButton) {
+    void cancelDeepResearch(cancelButton.dataset.ticker, cancelButton.dataset.jobId);
+    return;
+  }
   if (event.target.closest(".memo-btn")) {
     window.print();
     return;

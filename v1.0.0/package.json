@@ -16,6 +16,7 @@
     "dist": "electron-builder"
   },
   "dependencies": {
+    "@openai/codex": "^0.147.0",
     "electron-updater": "^6.8.9"
   },
   "devDependencies": {
@@ -47,6 +48,9 @@
       "electron-main.js",
       "server.js",
       "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/@openai/codex*/**/*"
     ],
     "extraMetadata": {
       "main": "electron-main.js"

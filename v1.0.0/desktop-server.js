@@ -7,6 +7,7 @@ const path = require("node:path");
 const analyze = require("./api/analyze");
 const screen = require("./api/screen");
 const universe = require("./api/universe");
+const research = require("./lib/research-api");
 
 function resolvePublicDir() {
   const candidates = [
@@ -25,7 +26,8 @@ const publicDir = resolvePublicDir();
 const handlers = {
   "/api/analyze": analyze,
   "/api/screen": screen,
-  "/api/universe": universe
+  "/api/universe": universe,
+  "/api/research": research
 };
 
 function responseAdapter(res) {
@@ -94,8 +96,10 @@ function createAppServer() {
 
 let activeServer = null;
 
-function start(port = process.env.PORT || 3000) {
+function start(port = process.env.PORT || 3000, options = {}) {
   if (activeServer) return Promise.resolve(activeServer);
+
+  research.service.setOpenExternal(options.openExternal);
 
   return new Promise((resolve, reject) => {
     const server = createAppServer();

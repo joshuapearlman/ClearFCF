@@ -39,7 +39,7 @@ async function createWindow() {
   const preferredPort = Number(process.env.PORT) || 0;
 
   try {
-    const appServer = await server.start(preferredPort);
+    const appServer = await server.start(preferredPort, { openExternal: (targetUrl) => shell.openExternal(targetUrl) });
     const address = appServer.address();
     const port = typeof address === "object" && address ? address.port : preferredPort;
     const url = `http://127.0.0.1:${port}`;
@@ -63,7 +63,7 @@ async function createWindow() {
       let safe = false;
       try {
         const parsed = new URL(targetUrl);
-        safe = parsed.protocol === "https:" && ["www.sec.gov", "finance.yahoo.com"].includes(parsed.hostname);
+        safe = parsed.protocol === "https:";
       } catch {}
       if (safe) shell.openExternal(targetUrl);
       return { action: "deny" };
