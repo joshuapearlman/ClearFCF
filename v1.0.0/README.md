@@ -41,8 +41,8 @@ The `.github/workflows/mac-release.yml` workflow runs on `v*` tags, builds the M
 
 ## What it includes
 - **Selectable Screening Universes**: S&P 500 (Large Cap), S&P 400 (Mid Cap), Small-Cap Value (~500+), Full SEC Operating Universe (~4,000+), or Yahoo Discovery lists
-- **"Skip Previously Reviewed" Toggle & Reset**: Remembers dismissed ideas in browser storage so every scan yields fresh candidates, with an instant one-click history reset
-- **Quick Action Buttons**: "✕ Pass" button on each row to dismiss ideas from future runs
+- **Stop-and-Resume Market Scans**: Scan the selected universe continuously, stop after any completed batch, and resume later without losing results
+- **Adjustable Result Filters and Columns**: Tune display-only thresholds and save the exact result columns you want to see without changing qualification status
 - **Equal-Weighted Normalized FCF**: 50/50 blend of simple average annual margin and aggregate volume-weighted margin × latest annual revenue
 - **Economic FCF (post-SBC)**: Explicitly tracks Stock-Based Compensation as an ongoing economic compensation expense
 - **Routine Intangibles in CapEx**: Includes software development and intangible asset acquisition alongside tangible PP&E

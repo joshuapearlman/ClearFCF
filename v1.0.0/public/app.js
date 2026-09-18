@@ -7,8 +7,8 @@ if (!screening?.evaluateCandidate) {
   throw new Error("ClearFCF screening module failed to load. Refresh the page to load the latest application files.");
 }
 
-const MC_LEVELS = [0, 500e6, 1e9, 2e9, 5e9, 10e9, 50e9, 100e9, 500e9];
-const MC_LEVEL_LABELS = ["$0 (All)", "$500M", "$1B", "$2B", "$5B", "$10B", "$50B", "$100B", "$500B"];
+const MC_LEVELS = [0, 250e6, 500e6, 1e9, 2e9, 5e9, 10e9, 50e9, 100e9, 500e9];
+const MC_LEVEL_LABELS = ["$0 (All)", "$250M", "$500M", "$1B", "$2B", "$5B", "$10B", "$50B", "$100B", "$500B"];
 
 const MAX_MC_LEVELS = [1e9, 2e9, 5e9, 10e9, 50e9, 200e9, 500e9, 1e12, Infinity];
 const MAX_MC_LEVEL_LABELS = ["$1B", "$2B", "$5B", "$10B", "$50B", "$200B", "$500B", "$1T", "Any ($5T+)"];
@@ -39,6 +39,8 @@ const PRESETS = {
     maxSbc: 0.40,
     maxDilution: 0.35,
     minPosFcf: 0.67,
+    minMarketCap: 0,
+    maxMarketCap: Infinity,
     enforceSolvency: false,
     excludeFinancials: true,
     requireCompleteData: true,
@@ -53,12 +55,17 @@ const PRESETS = {
     maxSbc: 0.15,
     maxDilution: 0.10,
     minPosFcf: 0.75,
+    minMarketCap: 0,
+    maxMarketCap: Infinity,
     enforceSolvency: true,
     excludeFinancials: true,
     requireCompleteData: true,
     lookbackYears: "all"
   }
 };
+
+const DEFAULT_VISIBLE_COLUMNS = ["ticker", "status", "price", "marketCap", "priceToNfcf", "fcfYield", "dividendYield", "insiderSignal", "usableYears"];
+const COLUMN_STORAGE_KEY = "clear-fcf-visible-columns-v1";
 
 const state = {
   auto: null,
@@ -68,10 +75,16 @@ const state = {
   researchSettings: { model: "gpt-5.6-sol", effort: "high" },
   stopped: false,
   activeFilters: new Set(),
-  displayFilters: { minDividendYield: 0 },
+  displayFilters: {
+    maxNetDebt: 0,
+    maxSbcPercent: 15,
+    maxShareChangePercent: 0,
+    maxMultiple: 10,
+    minDividendYieldPercent: 2
+  },
   sortKey: 'priceToNfcf',
   sortAsc: true,
-  showMoreMetrics: false,
+  visibleColumns: new Set(DEFAULT_VISIBLE_COLUMNS),
   activePreset: "default",
   criteria: { ...PRESETS.default }
 };
@@ -100,7 +113,6 @@ function decisionText(row, evaluation) {
 }
 
 const STORAGE_KEY = "clear-fcf-auto-v3";
-const REVIEWED_KEY = "clear-fcf-reviewed-v2";
 const PERFORMANCE_KEY = "clear-fcf-performance-v1";
 const RESEARCH_STORAGE_KEY = "clear-fcf-deep-research-v1";
 const RESEARCH_SETTINGS_KEY = "clear-fcf-research-settings-v1";
@@ -183,42 +195,39 @@ $("#default-speed-button")?.addEventListener("click", () => {
   setStatus("Default scan speed restored: 1 worker, 250ms pacing, 400ms pause, batch size 8.");
 });
 window.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !$("#settings-modal")?.classList.contains("hidden")) closeSettings();
+  const modal = document.querySelector(".modal:not(.hidden)");
+  if (!modal) return;
+  if (event.key === "Escape" && modal.id === "settings-modal") {
+    closeSettings();
+    return;
+  }
+  if (event.key !== "Tab") return;
+  const focusable = [...modal.querySelectorAll('button, input, select, textarea, [href], [tabindex]:not([tabindex="-1"])')]
+    .filter((element) => !element.disabled && !element.closest(".hidden"));
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
 });
 
-function getReviewedTickers() {
-  try { return new Set(JSON.parse(localStorage.getItem(REVIEWED_KEY)) || []); }
-  catch { return new Set(); }
+function loadVisibleColumns() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COLUMN_STORAGE_KEY));
+    if (Array.isArray(saved) && saved.includes("ticker")) state.visibleColumns = new Set(saved);
+  } catch {}
 }
 
-function saveReviewedTickers(set) {
-  try { localStorage.setItem(REVIEWED_KEY, JSON.stringify([...set])); } catch {}
+function saveVisibleColumns() {
+  try { localStorage.setItem(COLUMN_STORAGE_KEY, JSON.stringify([...state.visibleColumns])); } catch {}
 }
 
-function markTickerReviewed(ticker) {
-  const set = getReviewedTickers();
-  set.add(String(ticker).toUpperCase());
-  saveReviewedTickers(set);
-  updateSeenBadge();
-}
-
-function updateSeenBadge() {
-  const set = getReviewedTickers();
-  const el = $("#seen-count-badge");
-  if (!el) return;
-  el.innerHTML = `Hiding <strong>${set.size}</strong> reviewed stocks • <button id="reset-seen-btn" type="button" class="text-link">Reset history</button>`;
-  $("#reset-seen-btn")?.addEventListener("click", resetReviewedHistory);
-}
-
-function resetReviewedHistory() {
-  const set = getReviewedTickers();
-  if (!set.size) return setStatus("No reviewed stocks to reset.");
-  if (confirm(`Reset ${set.size} previously reviewed stocks so they can appear in scans again?`)) {
-    saveReviewedTickers(new Set());
-    updateSeenBadge();
-    setStatus(`Reset complete. All ${set.size} stocks can now be scanned again.`);
-  }
-}
+loadVisibleColumns();
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 }
@@ -260,10 +269,19 @@ function setStatus(message, error = false) {
   const el = $("#status");
   if (!el) return;
   el.textContent = message;
+  el.classList.remove("hidden");
   el.classList.toggle("error", error);
   el.classList.remove("status-update");
   void el.offsetWidth;
   el.classList.add("status-update");
+}
+
+function hideStatus() {
+  const el = $("#status");
+  if (!el) return;
+  el.textContent = "";
+  el.classList.add("hidden");
+  el.classList.remove("error", "status-update");
 }
 
 function parseTickers(input) {
@@ -318,165 +336,154 @@ async function request(url, options) {
 }
 
 function switchView(viewId) {
-  document.querySelectorAll(".nav-button").forEach((item) => item.classList.toggle("active", item.dataset.view === viewId));
+  document.querySelectorAll(".nav-button").forEach((item) => {
+    const active = item.dataset.view === viewId;
+    item.classList.toggle("active", active);
+    if (active) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
+  });
   document.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view.id === viewId));
-
-  if (viewId === "ideas") {
-    if (state.auto && state.auto.results && state.auto.results.length) {
-      setStatus(`Idea Finder: ${state.auto.results.length} ideas found from ${state.auto.cursor} companies.`);
-    } else {
-      setStatus("Ready.");
-    }
-  } else if (viewId === "screen") {
-    setStatus("Paste up to 50 tickers to screen your watchlist.");
-  } else if (viewId === "analyze") {
-    const currentTicker = $("#single-ticker")?.value.trim().toUpperCase();
-    if (currentTicker && state.reports[currentTicker]) {
-      setStatus(`${currentTicker} analysis complete.`);
-    } else {
-      setStatus("Enter a ticker symbol to view its complete normalized FCF report.");
-    }
-  }
+  hideStatus();
 }
 
 document.querySelectorAll(".nav-button").forEach((button) => {
   button.addEventListener("click", () => switchView(button.dataset.view));
 });
+document.querySelector('.nav-button[data-view="ideas"]')?.setAttribute("aria-current", "page");
+
+const RESULT_COLUMNS = [
+  { key: "ticker", label: "Company", className: "col-company" },
+  { key: "status", label: "Status", className: "col-status" },
+  { key: "price", label: "Price" },
+  { key: "marketCap", label: "Market cap" },
+  { key: "priceToNfcf", label: "P/nFCF" },
+  { key: "priceToEconomicNfcf", label: "P/Econ nFCF" },
+  { key: "evToUnleveredNfcf", label: "EV/Unlevered" },
+  { key: "fcfYield", label: "FCF yield" },
+  { key: "dividendYield", label: "Dividend yield" },
+  { key: "fiveYearDividendYield", label: "5Y div. avg" },
+  { key: "shareholderYield", label: "Shareholder yield" },
+  { key: "insiderSignal", label: "Insiders" },
+  { key: "economicFcfYield", label: "Econ yield" },
+  { key: "fcfTrajectory", label: "FCF trend" },
+  { key: "buybackRating", label: "Buyback audit" },
+  { key: "capexToDnaRatio", label: "CapEx/D&A" },
+  { key: "usableYears", label: "History" },
+  { key: "netDebtToNfcf", label: "Net debt/nFCF" },
+  { key: "normalizedSbcToFcf", label: "3Y SBC/FCF" }
+];
+
+function companyCell(row) {
+  return `<button type="button" class="company-link" data-open-report="${escapeHtml(row.ticker)}" aria-label="Open ${escapeHtml(row.ticker)} company report">
+    <span class="ticker">${escapeHtml(row.ticker)}</span>
+    <span class="subname">${escapeHtml(row.companyName)}</span>
+    ${row.netDebtToNfcf !== null && row.netDebtToNfcf < 0 ? '<span class="badge badge-netcash">Net Cash</span>' : ''}
+    ${row.fcfTrajectory === 'Expanding' ? '<span class="badge badge-green">Expanding</span>' : ''}
+    ${row.insiderBuying ? '<span class="badge badge-green">Insider Buying</span>' : ''}
+    <span class="result-summary ${row.status === "Idea" ? "" : "not-qualified"}">${escapeHtml(row.status === "Idea" ? (row.decisionSummary || "Qualified as an Idea") : `Why not Idea: ${row.nonQualificationReason || row.primaryReason || "See screening details"}`)}</span>
+  </button>`;
+}
+
+function resultCell(row, key) {
+  const cells = {
+    ticker: () => companyCell(row),
+    status: () => `<span class="badge ${String(row.status).toLowerCase()}">${escapeHtml(row.status)}</span>`,
+    price: () => compact(row.price, true),
+    marketCap: () => compact(row.marketCap, true),
+    priceToNfcf: () => multiple(row.priceToNfcf),
+    priceToEconomicNfcf: () => multiple(row.priceToEconomicNfcf),
+    evToUnleveredNfcf: () => multiple(row.evToUnleveredNfcf),
+    fcfYield: () => percent(row.fcfYield),
+    dividendYield: () => `${percent(row.dividendYield)}${row.dividendCoverage && row.dividendCoverage !== 'No dividend' ? `<small class="cell-note">${escapeHtml(row.dividendCoverage)}</small>` : ''}`,
+    fiveYearDividendYield: () => percent(row.fiveYearDividendYield),
+    shareholderYield: () => percent(row.shareholderYield),
+    insiderSignal: () => `<span class="badge ${row.insiderValueAligned ? 'badge-blue' : row.insiderBuying ? 'badge-green' : ''}">${escapeHtml(row.insiderSignal || 'Unavailable')}</span>${row.latestInsiderPurchaseDate ? `<small class="cell-note">Latest ${escapeHtml(row.latestInsiderPurchaseDate)}</small>` : ''}`,
+    economicFcfYield: () => percent(row.economicFcfYield),
+    fcfTrajectory: () => `<span class="badge ${row.fcfTrajectory === 'Expanding' ? 'badge-green' : row.fcfTrajectory === 'Deteriorating' ? 'badge-amber' : ''}">${escapeHtml(row.fcfTrajectory || 'Stable')}</span>`,
+    buybackRating: () => `<span class="badge ${row.buybackRating === 'Accretive' ? 'badge-green' : row.buybackRating === 'Value Destructive' ? 'badge-amber' : ''}">${escapeHtml(row.buybackRating || 'N/A')}</span>`,
+    capexToDnaRatio: () => row.capexToDnaRatio ? `${(row.capexToDnaRatio * 100).toFixed(0)}%` : "—",
+    usableYears: () => `${escapeHtml(row.usableYears)} yrs`,
+    netDebtToNfcf: () => multiple(row.netDebtToNfcf),
+    normalizedSbcToFcf: () => percent(row.normalizedSbcToFcf ?? row.latestSbcToFcf)
+  };
+  return cells[key]?.() || "—";
+}
+
+function columnPickerHtml() {
+  return `<details class="column-picker">
+    <summary>Columns <span>${state.visibleColumns.size}</span></summary>
+    <div class="column-menu" role="group" aria-label="Visible result columns">
+      ${RESULT_COLUMNS.map((column) => `<label><input type="checkbox" data-column-toggle="${column.key}" aria-label="Show ${column.label} column" ${state.visibleColumns.has(column.key) ? "checked" : ""} ${column.key === "ticker" ? "disabled" : ""}> ${column.label}</label>`).join("")}
+      <button type="button" class="text-link" data-reset-columns aria-label="Restore default result columns">Restore defaults</button>
+    </div>
+  </details>`;
+}
 
 function tableHtml(results, title, statusFilter = "All", counts = {}) {
   const tabs = `<div class="status-tabs" role="tablist" aria-label="Result status">
-    ${["All", "Idea", "Review", "Excluded"].map((status) => `<button type="button" class="status-tab ${statusFilter === status ? "active" : ""}" data-status-filter="${status}">${status} <span>${counts[status] || 0}</span></button>`).join("")}
+    ${["All", "Idea", "Review", "Excluded"].map((status) => `<button type="button" role="tab" aria-selected="${statusFilter === status}" tabindex="${statusFilter === status ? "0" : "-1"}" class="status-tab ${statusFilter === status ? "active" : ""}" data-status-filter="${status}">${status} <span>${counts[status] || 0}</span></button>`).join("")}
   </div>`;
+  const tools = `<div class="results-tools">${tabs}${columnPickerHtml()}<button class="export" type="button">Export CSV</button></div>`;
   if (!results.length) return `<div class="results-shell">
-    <div class="results-head"><h2>${escapeHtml(title)} <small>(${counts.All || 0})</small></h2>${tabs}</div>
-    <div class="empty-state compact-empty filtered-empty">
-    <div class="empty-mark" aria-hidden="true"><span></span><span></span><span></span></div>
-    <h3>No companies match this view</h3>
-    <p>Choose another status tab, clear a display filter, or widen the qualification criteria.</p>
-  </div></div>`;
-  return `<div class="results-shell ${state.showMoreMetrics ? "show-more" : ""}">
-    <div class="results-head">
-      <h2>${escapeHtml(title)} <small>(${results.length})</small></h2>
-      <div class="results-tools">
-        ${tabs}
-        <button class="metrics-toggle" type="button" data-more-metrics aria-expanded="${state.showMoreMetrics}">${state.showMoreMetrics ? "Fewer metrics" : "More metrics"}</button>
-        <button class="export" type="button">Export CSV</button>
-      </div>
+    <div class="results-head"><h2>${escapeHtml(title)} <small>(${counts.All || 0})</small></h2>${tools}</div>
+    <div class="empty-state compact-empty filtered-empty" role="tabpanel" tabindex="0">
+      <div class="empty-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+      <h3>No companies match this view</h3>
+      <p>Choose another status tab, clear a display filter, or widen the qualification criteria.</p>
     </div>
-    <div class="table-scroll">
-      <table>
-        <thead>
-          <tr>
-            <th class="col-action">Action</th>
-            <th class="sortable col-company" data-sort="ticker">Company</th>
-            <th class="sortable col-status" data-sort="status">Status</th>
-            <th class="sortable" data-sort="price">Price</th>
-            <th class="sortable" data-sort="marketCap">Market cap</th>
-            <th class="sortable" data-sort="priceToNfcf">P/nFCF</th>
-            <th class="sortable optional-metric" data-sort="priceToEconomicNfcf">P/Econ nFCF</th>
-            <th class="sortable optional-metric" data-sort="evToUnleveredNfcf">EV/Unlevered</th>
-            <th class="sortable" data-sort="fcfYield">FCF yield</th>
-            <th class="sortable" data-sort="dividendYield">Dividend yield</th>
-            <th class="sortable optional-metric" data-sort="fiveYearDividendYield">5Y div. avg</th>
-            <th class="sortable optional-metric" data-sort="shareholderYield">Shareholder yield</th>
-            <th class="sortable" data-sort="insiderSignal">Insiders</th>
-            <th class="sortable optional-metric" data-sort="economicFcfYield">Econ yield</th>
-            <th class="sortable optional-metric" data-sort="fcfTrajectory">FCF Trend</th>
-            <th class="sortable optional-metric" data-sort="buybackRating">Buyback Audit</th>
-            <th class="sortable optional-metric" data-sort="capexToDnaRatio">CapEx/D&A</th>
-            <th class="sortable" data-sort="usableYears">History</th>
-            <th class="sortable optional-metric" data-sort="netDebtToNfcf">Net debt/nFCF</th>
-            <th class="sortable optional-metric" data-sort="normalizedSbcToFcf">3Y SBC/FCF</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${results.map((row) => `<tr data-ticker="${escapeHtml(row.ticker)}">
-            <td class="col-action"><button class="btn-action btn-dismiss" data-dismiss="${escapeHtml(row.ticker)}" title="Dismiss this stock from future scans">✕ Pass</button></td>
-            <td class="col-company">
-              <span class="ticker">${escapeHtml(row.ticker)}</span>
-              <span class="subname">${escapeHtml(row.companyName)}</span>
-              ${row.netDebtToNfcf !== null && row.netDebtToNfcf < 0 ? '<span class="badge badge-netcash" title="Net cash position">Net Cash</span>' : ''}
-              ${row.fcfTrajectory === 'Expanding' ? '<span class="badge badge-green" title="3-year margin expanding">Expanding</span>' : ''}
-              ${row.buybackRating === 'Accretive' ? '<span class="badge badge-blue" title="Historical buybacks executed at a discount">Accretive Buyback</span>' : ''}
-              ${row.insiderValueAligned ? '<span class="badge badge-blue" title="Recent disclosed insider buying overlaps with an inexpensive P/nFCF; motive is not known">Insider + Value</span>' : row.insiderBuying ? '<span class="badge badge-green" title="Recent disclosed insider purchase activity">Insider Buying</span>' : ''}
-              ${row.normalizedSbcToFcf && row.normalizedSbcToFcf > 0.25 ? '<span class="badge badge-amber" title="Recent normalized SBC absorbs >25% of normalized FCF">High SBC</span>' : ''}
-              <span class="result-summary ${row.status === "Idea" ? "" : "not-qualified"}" title="${escapeHtml(row.decisionSummary || '')}">${escapeHtml(row.status === "Idea" ? (row.decisionSummary || "Qualified as an Idea") : `Why not Idea: ${row.nonQualificationReason || row.primaryReason || "See screening details"}`)}</span>
-            </td>
-            <td class="col-status" title="${escapeHtml([...(row.evaluation?.exclusions || []), ...(row.evaluation?.failures || []), ...(row.evaluation?.unknowns || [])].join("\n"))}"><span class="badge ${String(row.status).toLowerCase()}">${escapeHtml(row.status)}</span></td>
-            <td>${compact(row.price, true)}</td>
-            <td>${compact(row.marketCap, true)}</td>
-            <td>${multiple(row.priceToNfcf)}</td>
-            <td class="optional-metric">${multiple(row.priceToEconomicNfcf)}</td>
-            <td class="optional-metric">${multiple(row.evToUnleveredNfcf)}</td>
-            <td>${percent(row.fcfYield)}</td>
-            <td title="${escapeHtml(`Current indicated or trailing annual dividend yield. Coverage: ${row.dividendCoverage || 'Unavailable'}. Market data: ${row.marketDataAsOf || 'date unavailable'}`)}">${percent(row.dividendYield)}${row.dividendCoverage && row.dividendCoverage !== 'No dividend' ? `<small class="cell-note">${escapeHtml(row.dividendCoverage)}</small>` : ''}</td>
-            <td class="optional-metric" title="Yahoo Finance five-year average dividend yield">${percent(row.fiveYearDividendYield)}</td>
-            <td class="optional-metric" title="Dividends plus gross buybacks less SBC, divided by market cap">${percent(row.shareholderYield)}</td>
-            <td title="Purchase activity is evidence of buying, not proof the insider considered the shares cheap"><span class="badge ${row.insiderValueAligned ? 'badge-blue' : row.insiderBuying ? 'badge-green' : ''}">${escapeHtml(row.insiderSignal || 'Unavailable')}</span>${row.latestInsiderPurchaseDate ? `<small class="cell-note">Latest ${escapeHtml(row.latestInsiderPurchaseDate)}</small>` : ''}</td>
-            <td class="optional-metric">${percent(row.economicFcfYield)}</td>
-            <td class="optional-metric"><span class="badge ${row.fcfTrajectory === 'Expanding' ? 'badge-green' : row.fcfTrajectory === 'Deteriorating' ? 'badge-amber' : ''}">${escapeHtml(row.fcfTrajectory || 'Stable')}</span></td>
-            <td class="optional-metric"><span class="badge ${row.buybackRating === 'Accretive' ? 'badge-green' : row.buybackRating === 'Value Destructive' ? 'badge-amber' : ''}">${escapeHtml(row.buybackRating || 'N/A')}</span></td>
-            <td class="optional-metric">${row.capexToDnaRatio ? `${(row.capexToDnaRatio * 100).toFixed(0)}%` : "—"}</td>
-            <td>${escapeHtml(row.usableYears)} yrs</td>
-            <td class="optional-metric">${multiple(row.netDebtToNfcf)}</td>
-            <td class="optional-metric">${percent(row.normalizedSbcToFcf ?? row.latestSbcToFcf)}</td>
-          </tr>`).join("")}
-        </tbody>
-      </table>
+  </div>`;
+  const columns = RESULT_COLUMNS.filter((column) => state.visibleColumns.has(column.key));
+  return `<div class="results-shell">
+    <div class="results-head"><h2>${escapeHtml(title)} <small>(${results.length})</small></h2>${tools}</div>
+    <div class="table-scroll" role="tabpanel" tabindex="0">
+      <table><thead><tr>${columns.map((column) => {
+        const sorted = state.sortKey === column.key;
+        return `<th scope="col" class="sortable ${column.className || ""} ${sorted ? (state.sortAsc ? "sorted-asc" : "sorted-desc") : ""}" aria-sort="${sorted ? (state.sortAsc ? "ascending" : "descending") : "none"}"><button type="button" class="sort-button" data-sort="${column.key}">${column.label}<span aria-hidden="true"></span></button></th>`;
+      }).join("")}</tr></thead>
+      <tbody>${results.map((row) => `<tr>${columns.map((column) => `<td class="${column.className || ""}">${resultCell(row, column.key)}</td>`).join("")}</tr>`).join("")}</tbody></table>
     </div>
   </div>`;
 }
 
 function attachTableEvents(container, results) {
-  container.querySelectorAll("tbody tr").forEach((row) => row.addEventListener("click", (e) => {
-    if (e.target.closest("button")) return;
-    openReport(row.dataset.ticker);
-  }));
+  container.querySelectorAll("[data-open-report]").forEach((button) => button.addEventListener("click", () => openReport(button.dataset.openReport)));
 
-  container.querySelectorAll("button[data-dismiss]").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const ticker = btn.dataset.dismiss;
-      markTickerReviewed(ticker);
-      if (state.auto?.results) {
-        state.auto.results = state.auto.results.filter((r) => r.ticker !== ticker);
-        saveAuto();
-        updateAutoUi();
-      } else {
-        btn.closest("tr")?.remove();
-      }
-      setStatus(`Dismissed ${ticker}. It will be skipped on future scans.`);
-    });
-  });
-
-  container.querySelectorAll("th.sortable").forEach((th) => {
-    const sortKey = th.dataset.sort;
-    if (state.sortKey === sortKey) {
-      th.classList.add(state.sortAsc ? 'sorted-asc' : 'sorted-desc');
+  container.querySelectorAll("[data-sort]").forEach((button) => button.addEventListener("click", () => {
+    const sortKey = button.dataset.sort;
+    if (state.sortKey === sortKey) state.sortAsc = !state.sortAsc;
+    else {
+      state.sortKey = sortKey;
+      state.sortAsc = true;
     }
-    th.addEventListener("click", () => {
-      if (state.sortKey === sortKey) {
-        state.sortAsc = !state.sortAsc;
-      } else {
-        state.sortKey = sortKey;
-        state.sortAsc = true;
-      }
-      renderTable(container, container._rawResults || results, container._rawTitle || "Results");
-    });
-  });
-
-  container.querySelector(".export")?.addEventListener("click", () => exportCsv(applyFilterAndSort(results, container._statusFilter || "All")));
-  container.querySelectorAll("[data-status-filter]").forEach((button) => button.addEventListener("click", () => {
-    container._statusFilter = button.dataset.statusFilter;
     renderTable(container, container._rawResults || results, container._rawTitle || "Results");
   }));
-  container.querySelector("[data-more-metrics]")?.addEventListener("click", (event) => {
-    state.showMoreMetrics = !state.showMoreMetrics;
-    document.querySelectorAll(".results-shell").forEach((shell) => shell.classList.toggle("show-more", state.showMoreMetrics));
-    document.querySelectorAll("[data-more-metrics]").forEach((button) => {
-      button.textContent = state.showMoreMetrics ? "Fewer metrics" : "More metrics";
-      button.setAttribute("aria-expanded", String(state.showMoreMetrics));
+
+  container.querySelector(".export")?.addEventListener("click", () => exportCsv(applyFilterAndSort(results, container._statusFilter || "All")));
+  const statusTabs = [...container.querySelectorAll("[data-status-filter]")];
+  statusTabs.forEach((button, index) => {
+    button.addEventListener("click", () => {
+      container._statusFilter = button.dataset.statusFilter;
+      renderTable(container, container._rawResults || results, container._rawTitle || "Results");
     });
+    button.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === "ArrowRight" ? (index + 1) % statusTabs.length : (index - 1 + statusTabs.length) % statusTabs.length;
+      statusTabs[next].focus();
+      statusTabs[next].click();
+    });
+  });
+
+  container.querySelectorAll("[data-column-toggle]").forEach((input) => input.addEventListener("change", () => {
+    if (input.checked) state.visibleColumns.add(input.dataset.columnToggle);
+    else state.visibleColumns.delete(input.dataset.columnToggle);
+    saveVisibleColumns();
+    renderTable(container, container._rawResults || results, container._rawTitle || "Results");
+  }));
+  container.querySelector("[data-reset-columns]")?.addEventListener("click", () => {
+    state.visibleColumns = new Set(DEFAULT_VISIBLE_COLUMNS);
+    saveVisibleColumns();
+    renderTable(container, container._rawResults || results, container._rawTitle || "Results");
   });
 }
 
@@ -502,31 +509,27 @@ function applyFilterAndSort(results, statusFilter = "All") {
 
   if (statusFilter !== "All") list = list.filter((row) => row.status === statusFilter);
 
-  // 2. Quick Filter Pills
-  if (state.activeFilters.has('net-cash')) {
-    list = list.filter((r) => typeof r.netDebtToNfcf === 'number' && r.netDebtToNfcf < 0);
+  // 2. Adjustable display filters (never change qualification status)
+  if (state.activeFilters.has('net-debt')) {
+    list = list.filter((r) => typeof r.netDebtToNfcf === 'number' && r.netDebtToNfcf <= state.displayFilters.maxNetDebt);
   }
   if (state.activeFilters.has('low-sbc')) {
-    list = list.filter((r) => typeof (r.normalizedSbcToFcf ?? r.latestSbcToFcf) === 'number' && (r.normalizedSbcToFcf ?? r.latestSbcToFcf) < 0.15);
+    list = list.filter((r) => typeof (r.normalizedSbcToFcf ?? r.latestSbcToFcf) === 'number' && (r.normalizedSbcToFcf ?? r.latestSbcToFcf) <= state.displayFilters.maxSbcPercent / 100);
   }
   if (state.activeFilters.has('buybacks')) {
-    list = list.filter((r) => typeof r.shareChange === 'number' && r.shareChange < 0);
+    list = list.filter((r) => typeof r.shareChange === 'number' && r.shareChange <= state.displayFilters.maxShareChangePercent / 100);
   }
-  if (state.activeFilters.has('sub-10')) {
-    list = list.filter((r) => typeof r.priceToNfcf === 'number' && r.priceToNfcf < 10);
+  if (state.activeFilters.has('multiple')) {
+    list = list.filter((r) => typeof r.priceToNfcf === 'number' && r.priceToNfcf <= state.displayFilters.maxMultiple);
   }
   if (state.activeFilters.has('expanding')) {
     list = list.filter((r) => r.fcfTrajectory === 'Expanding');
   }
-  if (state.activeFilters.has('dividend-payers')) {
-    list = list.filter((r) => typeof r.dividendYield === 'number' && r.dividendYield > 0);
-  }
   if (state.activeFilters.has('insider-buying')) {
     list = list.filter((r) => r.insiderBuying === true);
   }
-  const minDividendYield = Number(state.displayFilters.minDividendYield) || 0;
-  if (minDividendYield > 0) {
-    list = list.filter((r) => typeof r.dividendYield === 'number' && r.dividendYield >= minDividendYield);
+  if (state.activeFilters.has('dividend')) {
+    list = list.filter((r) => typeof r.dividendYield === 'number' && r.dividendYield >= state.displayFilters.minDividendYieldPercent / 100);
   }
 
   // 3. Column Sorting
@@ -1121,13 +1124,13 @@ function saveAuto() {
 function updateAutoUi() {
   const scan = state.auto;
   if (!scan) return;
-  const max = Math.min(scan.maxExamine, scan.symbols.length);
+  const max = scan.symbols.length;
   const examined = Math.min(scan.cursor, max);
   const percentComplete = max ? Math.round((examined / max) * 100) : 0;
   const completedThisRun = Math.max(0, examined - Number(scan.runStartCursor || 0));
   const elapsedSeconds = scan.runStartedAt ? (Date.now() - scan.runStartedAt) / 1000 : 0;
   const secondsPerTicker = completedThisRun > 0 ? elapsedSeconds / completedThisRun : NaN;
-  const eta = scan.complete ? "Complete" : state.stopped ? "Paused" : formatDuration((max - examined) * secondsPerTicker);
+  const eta = scan.complete ? "Complete" : state.stopped ? "Stopped" : formatDuration((max - examined) * secondsPerTicker);
   $("#progress-wrap").classList.remove("hidden");
   $("#progress-bar").style.width = `${percentComplete}%`;
   $("#progress-text").textContent = `${examined}/${max} examined • ${scan.results.length} ${scan.results.length === 1 ? "idea" : "ideas"} found`;
@@ -1139,14 +1142,17 @@ function updateAutoUi() {
   $("#scan-ideas").textContent = String(scan.results.length);
   $("#scan-failures").textContent = String(scan.failures.length);
   $("#scan-eta").textContent = eta;
-  $("#scan-state").textContent = scan.complete ? "Scan complete" : state.stopped ? "Scan paused" : "Analyzing companies";
+  $("#scan-state").textContent = scan.complete ? "Scan complete" : state.stopped ? "Scan stopped" : "Analyzing companies";
   const health = $("#scan-health");
   health.textContent = scan.rateLimited
     ? "Rate limit pause"
     : `${performance.workers} worker${performance.workers === 1 ? "" : "s"} • ${performance.pacingMs}ms pacing`;
   health.classList.toggle("health-warning", Boolean(scan.rateLimited));
   health.classList.toggle("health-good", !scan.rateLimited);
-  if (examined > 0) renderTable($("#idea-results"), scan.allExamined || scan.results, "Analyzed companies", "Idea");
+  if (examined > 0) {
+    $("#result-filters")?.classList.remove("hidden");
+    renderTable($("#idea-results"), scan.allExamined || scan.results, "Analyzed companies", "Idea");
+  }
 }
 
 async function runAuto() {
@@ -1156,32 +1162,23 @@ async function runAuto() {
   scan.runStartCursor = scan.cursor;
   scan.rateLimited = false;
   $("#progress-wrap").classList.add("is-running");
-  $("#scan-pause-button")?.classList.remove("hidden");
-  if ($("#scan-pause-button")) $("#scan-pause-button").disabled = false;
-  $("#find-button").disabled = true;
+  $("#find-button").classList.add("hidden");
+  $("#stop-button").classList.remove("hidden");
   $("#stop-button").disabled = false;
-  const max = Math.min(scan.maxExamine, scan.symbols.length);
+  const max = scan.symbols.length;
   try {
-    const skipSeen = $("#skip-seen")?.checked ?? true;
-    const reviewed = skipSeen ? getReviewedTickers() : new Set();
     scan.allExamined = scan.allExamined || [];
 
     while (scan.cursor < max && !state.stopped) {
       const performance = readPerformanceSettings(true);
       const batchRows = scan.symbols.slice(scan.cursor, scan.cursor + performance.batchSize);
-      const unreviewedRows = batchRows.filter((item) => !reviewed.has(item.ticker));
-      if (!unreviewedRows.length) {
-        scan.cursor += batchRows.length;
-        updateAutoUi();
-        continue;
-      }
-      const batch = unreviewedRows.map((item) => item.ticker);
+      const batch = batchRows.map((item) => item.ticker);
       const data = await request("/api/screen", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tickers: batch,
-          quotes: unreviewedRows.map(({ ticker, price, marketCap }) => ({ ticker, price, marketCap })),
+          quotes: batchRows.map(({ ticker, price, marketCap }) => ({ ticker, price, marketCap })),
           criteria: state.criteria,
           performance
         })
@@ -1221,33 +1218,32 @@ async function runAuto() {
     scan.complete = scan.cursor >= max;
     saveAuto();
     updateAutoUi();
-    const reason = state.stopped ? "stopped" : "universe completed";
-    setStatus(`Auto Finder ${reason}: ${scan.results.length} ideas from ${scan.cursor} companies.`);
+    const reason = state.stopped ? "stopped" : "complete";
+    setStatus(`Scan ${reason}: ${scan.results.length} ideas from ${scan.cursor} companies.`);
   } catch (error) {
     state.stopped = true;
     updateAutoUi();
-    setStatus(`Scan paused: ${error.message}. Press Resume to continue.`, true);
+    setStatus(`Scan stopped: ${error.message}. Press Resume to continue.`, true);
   } finally {
     $("#progress-wrap").classList.remove("is-running");
-    $("#scan-pause-button")?.classList.add("hidden");
+    $("#find-button").classList.remove("hidden");
     $("#find-button").disabled = false;
+    $("#stop-button").classList.add("hidden");
     $("#stop-button").disabled = true;
     $("#find-button").textContent = scan.complete ? "Start new scan" : "Resume scan";
   }
 }
 $("#find-button").addEventListener("click", async () => {
-  const maxExamine = Number($("#max-examine")?.value || 5000);
-  if (state.auto && !state.auto.complete && state.auto.maxExamine === maxExamine) return runAuto();
+  const universeType = $("#universe-select")?.value || "yahoo";
+  if (state.auto && !state.auto.complete && state.auto.universeType === universeType) return runAuto();
   try {
     setStatus("Loading idea lists...");
     $("#find-button").disabled = true;
-    const universeType = $("#universe-select")?.value || "yahoo";
     const universe = await request(`/api/universe?type=${encodeURIComponent(universeType)}&perSource=100`);
     state.auto = {
       universeType,
       symbols: universe.symbols,
       sources: universe.sources,
-      maxExamine,
       cursor: 0,
       results: [],
       failures: [],
@@ -1267,11 +1263,8 @@ $("#find-button").addEventListener("click", async () => {
 $("#stop-button").addEventListener("click", () => {
   state.stopped = true;
   $("#stop-button").disabled = true;
-});
-$("#scan-pause-button")?.addEventListener("click", () => {
-  state.stopped = true;
-  $("#scan-state").textContent = "Pausing after current batch…";
-  $("#scan-pause-button").disabled = true;
+  $("#scan-state").textContent = "Stopping after current batch…";
+  setStatus("Stopping after the current batch. Your results will be preserved.");
 });
 
 // Restore previous scan state if exists
@@ -1294,54 +1287,60 @@ try {
       state.auto.results = state.auto.allExamined.filter((row) => evaluateReportStatus(row, state.criteria) === "Idea");
     }
     if ($("#target")) $("#target").value = String(saved.target);
-    $("#max-examine").value = String(saved.maxExamine);
     $("#find-button").textContent = saved.complete ? "Start new scan" : "Resume scan";
     saveAuto();
     updateAutoUi();
-    setStatus(saved.complete ? `Previous scan found ${saved.results.length} ideas.` : `Saved scan can resume at ${saved.cursor} examined.`);
+    hideStatus();
   }
 } catch {
   localStorage.removeItem(STORAGE_KEY);
 }
 
-updateSeenBadge();
-
-// Quick Filters & Tolerances
-function initFilterChips() {
-  const container = document.querySelector("#filter-chips");
-  if (!container) return;
-  const chips = container.querySelectorAll(".chip[data-filter]");
-  const clearBtn = document.querySelector("#clear-chips");
+// Result filters and qualification criteria
+function initResultFilters() {
+  const container = document.querySelector("#result-filters");
   const toggleTolBtn = document.querySelector("#toggle-tolerances");
   const tolDrawer = document.querySelector("#tolerances-drawer");
 
-  chips.forEach((chip) => {
-    chip.addEventListener("click", () => {
-      const filter = chip.dataset.filter;
-      if (state.activeFilters.has(filter)) {
-        state.activeFilters.delete(filter);
-        chip.classList.remove("active");
-      } else {
-        state.activeFilters.add(filter);
-        chip.classList.add("active");
-      }
-      clearBtn?.classList.toggle("hidden", state.activeFilters.size === 0);
+  container?.querySelectorAll("input[type='checkbox'][data-filter]").forEach((input) => {
+    input.addEventListener("change", () => {
+      if (input.checked) state.activeFilters.add(input.dataset.filter);
+      else state.activeFilters.delete(input.dataset.filter);
+      input.closest(".adjustable-filter")?.classList.toggle("active", input.checked);
       refreshActiveTable();
     });
   });
 
-  clearBtn?.addEventListener("click", () => {
+  const valueInputs = {
+    "#filter-net-debt": ["maxNetDebt", Number],
+    "#filter-sbc": ["maxSbcPercent", Number],
+    "#filter-share-change": ["maxShareChangePercent", Number],
+    "#filter-multiple": ["maxMultiple", Number],
+    "#filter-dividend": ["minDividendYieldPercent", Number]
+  };
+  Object.entries(valueInputs).forEach(([selector, [key, parse]]) => {
+    $(selector)?.addEventListener("input", (event) => {
+      const value = parse(event.target.value);
+      if (Number.isFinite(value)) state.displayFilters[key] = value;
+      refreshActiveTable();
+    });
+  });
+
+  $("#clear-filters")?.addEventListener("click", () => {
     state.activeFilters.clear();
-    chips.forEach((c) => c.classList.remove("active"));
-    clearBtn.classList.add("hidden");
+    container?.querySelectorAll("input[type='checkbox'][data-filter]").forEach((input) => {
+      input.checked = false;
+      input.closest(".adjustable-filter")?.classList.remove("active");
+    });
     refreshActiveTable();
   });
 
   toggleTolBtn?.addEventListener("click", () => {
     tolDrawer?.classList.toggle("hidden");
-    toggleTolBtn.classList.toggle("active", !tolDrawer?.classList.contains("hidden"));
+    const expanded = !tolDrawer?.classList.contains("hidden");
+    toggleTolBtn.setAttribute("aria-expanded", String(expanded));
+    toggleTolBtn.textContent = expanded ? "Hide criteria" : "Customize criteria";
   });
-
 }
 
 function refreshActiveTable() {
@@ -1355,14 +1354,7 @@ function refreshActiveTable() {
   }
 }
 
-initFilterChips();
-
-$("#filter-dividend")?.addEventListener("input", (event) => {
-  const percentValue = Number(event.target.value) || 0;
-  state.displayFilters.minDividendYield = percentValue / 100;
-  $("#filter-dividend-val").textContent = percentValue > 0 ? `${percentValue.toFixed(1)}%+` : "Any";
-  refreshActiveTable();
-});
+initResultFilters();
 
 // Command Palette (Cmd+K)
 function initCommandPalette() {
@@ -1372,6 +1364,7 @@ function initCommandPalette() {
   if (!palette || !input) return;
 
   function openPalette() {
+    palette._returnFocus = document.activeElement;
     palette.classList.remove("hidden");
     input.value = "";
     renderCmdResults("");
@@ -1380,6 +1373,7 @@ function initCommandPalette() {
 
   function closePalette() {
     palette.classList.add("hidden");
+    palette._returnFocus?.focus?.();
   }
 
   window.addEventListener("keydown", (e) => {
@@ -1398,11 +1392,10 @@ function initCommandPalette() {
 
   const actions = [
     { type: "view", title: "Go to Idea Finder", view: "ideas" },
-    { type: "view", title: "Go to Watchlist / Paste Tickers", view: "screen" },
+    { type: "view", title: "Go to Watchlist", view: "screen" },
     { type: "view", title: "Go to Analyze Stock", view: "analyze" },
     
-    { type: "action", title: "Export CSV Report", run: () => exportCsv(state.auto?.results || []) },
-    { type: "action", title: "Reset Reviewed History", run: resetReviewedHistory }
+    { type: "action", title: "Export CSV Report", run: () => exportCsv(state.auto?.results || []) }
   ];
 
   function renderCmdResults(query) {
@@ -1675,6 +1668,7 @@ function getCalculationDetails(metric, report) {
 function openCalculationModal(metric, report) {
   const modal = $("#calc-modal");
   if (!modal) return;
+  modal._returnFocus = document.activeElement;
   const details = getCalculationDetails(metric, report);
 
   $("#calc-title").textContent = details.title;
@@ -1684,6 +1678,7 @@ function openCalculationModal(metric, report) {
   $("#calc-sources").textContent = details.sources;
 
   modal.classList.remove("hidden");
+  $("#calc-close-btn")?.focus();
 }
 
 function wait(milliseconds) {
@@ -1850,7 +1845,9 @@ $("#report")?.addEventListener("click", (event) => {
 });
 
 function closeCalculationModal() {
-  $("#calc-modal")?.classList.add("hidden");
+  const modal = $("#calc-modal");
+  modal?.classList.add("hidden");
+  modal?._returnFocus?.focus?.();
 }
 
 $("#calc-backdrop")?.addEventListener("click", closeCalculationModal);
@@ -1870,7 +1867,9 @@ window.addEventListener("keydown", (e) => {
 // Global Criteria Controllers & Real-Time Listeners
 function syncCriteriaControls(criteria, presetKey = "custom") {
   document.querySelectorAll(".preset-btn").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.preset === presetKey);
+    const active = btn.dataset.preset === presetKey;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-pressed", String(active));
   });
   if ($("#tol-multiple")) { $("#tol-multiple").value = criteria.maxMultiple; $("#tol-multiple-val").textContent = `${criteria.maxMultiple}x`; }
   if ($("#tol-ev-multiple")) {
@@ -1896,7 +1895,7 @@ function applyPreset(presetKey) {
   const preset = PRESETS[presetKey];
   if (!preset) return;
   state.activePreset = presetKey;
-  state.criteria = { ...preset };
+  state.criteria = { ...PRESETS.default, ...preset };
 
   syncCriteriaControls(preset, presetKey);
   reEvaluateAll();
@@ -1904,7 +1903,10 @@ function applyPreset(presetKey) {
 
 function markCustom() {
   state.activePreset = "custom";
-  document.querySelectorAll(".preset-btn").forEach((btn) => btn.classList.remove("active"));
+  document.querySelectorAll(".preset-btn").forEach((btn) => {
+    btn.classList.remove("active");
+    btn.setAttribute("aria-pressed", "false");
+  });
   reEvaluateAll();
 }
 
@@ -1995,11 +1997,13 @@ function resetSearch() {
   }
   $("#progress-wrap")?.classList.remove("is-running");
   $("#progress-wrap")?.classList.add("hidden");
+  $("#result-filters")?.classList.add("hidden");
   $("#find-button").disabled = false;
+  $("#find-button").classList.remove("hidden");
   $("#stop-button").disabled = true;
-  $("#find-button").textContent = "Find stocks";
-  $("#scan-pause-button").disabled = false;
-  setStatus("Search reset. Select universe and criteria, then click Find stocks to scan.");
+  $("#stop-button").classList.add("hidden");
+  $("#find-button").textContent = "Start scan";
+  setStatus("Scan reset. Choose a universe and start when ready.");
 }
 $("#reset-search-btn")?.addEventListener("click", resetSearch);
 
