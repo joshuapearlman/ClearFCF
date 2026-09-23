@@ -79,6 +79,11 @@ const TAGS = {
   ],
   currentAssets: ["AssetsCurrent", "CurrentAssets"],
   currentLiabilities: ["LiabilitiesCurrent", "CurrentLiabilities"],
+  accountsReceivable: ["AccountsReceivableNetCurrent", "AccountsNotesAndLoansReceivableNetCurrent", "ReceivablesNetCurrent"],
+  inventory: ["InventoryNet", "InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings"],
+  prepaidExpenses: ["PrepaidExpenseCurrent", "PrepaidExpensesAndOtherCurrentAssets", "OtherCurrentAssets"],
+  accountsPayable: ["AccountsPayableCurrent", "AccountsPayableAndOtherAccruedLiabilitiesCurrent"],
+  accruedExpenses: ["AccruedLiabilitiesCurrent", "AccruedExpensesAndOtherCurrentLiabilities", "OtherLiabilitiesCurrent"],
   historicalCash: [
     "CashCashEquivalentsAndShortTermInvestments", "CashAndCashEquivalentsAtCarryingValue",
     "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
@@ -86,7 +91,9 @@ const TAGS = {
   historicalShortDebt: [
     "ShortTermBorrowings", "ShortTermDebt", "DebtCurrent", "LongTermDebtCurrent",
     "NotesPayableCurrent", "CommercialPaper"
-  ]
+  ],
+  preferredStock: ["PreferredStockValue", "PreferredStockCarryingValue", "PreferredStocksIncludingAdditionalPaidInCapital"],
+  minorityInterest: ["MinorityInterest", "NoncontrollingInterestInConsolidatedEntity"]
 };
 
 async function cached(key, loader) {
@@ -395,7 +402,7 @@ function extractFinancials(facts) {
   for (const key of ["revenue", "grossProfit", "operatingIncome", "pretaxIncome", "incomeTaxExpense", "netIncome", "ocf", "capex", "intangibleCapex", "dna", "interestExpense", "sbc", "buybackCash", "buybackShares", "dividendsPaid"]) {
     series[key] = bestAnnualSeries(facts, TAGS[key]);
   }
-  for (const key of ["currentAssets", "currentLiabilities", "historicalCash", "historicalShortDebt"]) {
+  for (const key of ["currentAssets", "currentLiabilities", "accountsReceivable", "inventory", "prepaidExpenses", "accountsPayable", "accruedExpenses", "historicalCash", "historicalShortDebt"]) {
     series[key] = bestHistoricalInstantSeries(facts, TAGS[key]);
   }
   series.dilutedShares = bestHistoricalShareSeries(facts);
@@ -404,10 +411,12 @@ function extractFinancials(facts) {
   const shortDebt = latestInstant(facts, TAGS.shortDebt);
   const longDebt = latestInstant(facts, TAGS.longDebt);
   const sharesOutstanding = latestInstant(facts, TAGS.sharesOutstanding);
+  const preferredStock = latestInstant(facts, TAGS.preferredStock);
+  const minorityInterest = latestInstant(facts, TAGS.minorityInterest);
   const revUnit = series.revenue?.unit;
   const ocfUnit = series.ocf?.unit;
   const financialCurrency = (revUnit && revUnit !== "shares") ? revUnit : (ocfUnit && ocfUnit !== "shares") ? ocfUnit : "USD";
-  return { series, latest: { cash, totalDebt, shortDebt, longDebt, sharesOutstanding }, financialCurrency };
+  return { series, latest: { cash, totalDebt, shortDebt, longDebt, sharesOutstanding, preferredStock, minorityInterest }, financialCurrency };
 }
 
 function htmlAttribute(attributes, name) {

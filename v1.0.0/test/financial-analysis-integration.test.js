@@ -19,7 +19,7 @@ test("Financial Deep Analysis is served by the main ClearFCF application", () =>
 
   assert.match(mainIndex, /id="deep-analysis-modal"/);
   assert.match(mainIndex, /href="\/financial-analysis"/);
-  assert.match(mainIndex, /id="choose-financial-analysis"[^>]+target="_blank"/);
+  assert.doesNotMatch(mainIndex, /id="choose-financial-analysis"[^>]+target="_blank"/);
   assert.match(mainApp, /\/financial-analysis\?ticker=/);
   assert.doesNotMatch(mainApp, /:3001\/\?ticker=/);
 

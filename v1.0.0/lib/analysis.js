@@ -63,10 +63,21 @@ function annualRows(extracted) {
     const dividendsPaid = finite(dividendsPaidRaw) ? Math.abs(dividendsPaidRaw) : null;
     const currentAssets = valueForYear(extracted.series.currentAssets, year);
     const currentLiabilities = valueForYear(extracted.series.currentLiabilities, year);
+    const accountsReceivable = valueForYear(extracted.series.accountsReceivable, year);
+    const inventory = valueForYear(extracted.series.inventory, year);
+    const prepaidExpenses = valueForYear(extracted.series.prepaidExpenses, year);
+    const accountsPayable = valueForYear(extracted.series.accountsPayable, year);
+    const accruedExpenses = valueForYear(extracted.series.accruedExpenses, year);
     const historicalCash = valueForYear(extracted.series.historicalCash, year);
     const historicalShortDebt = valueForYear(extracted.series.historicalShortDebt, year);
-    const netWorkingCapital = finite(currentAssets) && finite(currentLiabilities)
-      ? currentAssets - (finite(historicalCash) ? historicalCash : 0) - currentLiabilities + (finite(historicalShortDebt) ? historicalShortDebt : 0)
+    const operatingCurrentAssets = [accountsReceivable, inventory, prepaidExpenses].some(finite)
+      ? [accountsReceivable, inventory, prepaidExpenses].reduce((sum, value) => sum + (finite(value) ? value : 0), 0)
+      : null;
+    const operatingCurrentLiabilities = [accountsPayable, accruedExpenses].some(finite)
+      ? [accountsPayable, accruedExpenses].reduce((sum, value) => sum + (finite(value) ? value : 0), 0)
+      : null;
+    const netWorkingCapital = finite(operatingCurrentAssets) && finite(operatingCurrentLiabilities)
+      ? operatingCurrentAssets - operatingCurrentLiabilities
       : null;
     const effectiveTaxRate = finite(incomeTaxExpense) && finite(pretaxIncome) && pretaxIncome > 0
       ? incomeTaxExpense / pretaxIncome
@@ -77,7 +88,8 @@ function annualRows(extracted) {
 
     return {
       year, revenue, grossProfit, ebit, pretaxIncome, incomeTaxExpense, effectiveTaxRate, netIncome,
-      currentAssets, currentLiabilities, historicalCash, historicalShortDebt, netWorkingCapital,
+      currentAssets, currentLiabilities, accountsReceivable, inventory, prepaidExpenses, accountsPayable, accruedExpenses,
+      operatingCurrentAssets, operatingCurrentLiabilities, historicalCash, historicalShortDebt, netWorkingCapital,
       ocf, capex, capexTangible, capexIntangible, dna, interest, sbc, shares, shareBasis,
       fcf,
       fcfEconomic,
@@ -144,7 +156,9 @@ function reconciliationNeeds(extracted, includeDetail = false) {
   const recent = rows.filter((row) => finite(row.revenue) && finite(row.fcf)).slice(0, 3);
   const sbcMissing = includeDetail && (recent.length < 3 || recent.some((row) => !finite(row.sbc)));
   const shortDebtMissing = includeDetail && !finite(extracted?.latest?.shortDebt?.val);
-  return { capexSuspicious, sbcMissing, shortDebtMissing, needed: capexSuspicious || sbcMissing || shortDebtMissing };
+  const nwcKeys = ["accountsReceivable", "inventory", "prepaidExpenses", "accountsPayable", "accruedExpenses"];
+  const nwcMissing = includeDetail && nwcKeys.some((key) => !extracted?.series?.[key]?.values?.size);
+  return { capexSuspicious, sbcMissing, shortDebtMissing, nwcMissing, needed: capexSuspicious || sbcMissing || shortDebtMissing || nwcMissing };
 }
 
 function reconcileAnnualFinancials(extracted, yahooFinancials, needs = reconciliationNeeds(extracted, true)) {
@@ -157,6 +171,7 @@ function reconcileAnnualFinancials(extracted, yahooFinancials, needs = reconcili
   let capexReconciled = false;
   let sbcReconciled = false;
   let shortDebtReconciled = false;
+  let nwcReconciled = false;
 
   if (needs.capexSuspicious) {
     const secLatest = annualRows(next).find((row) => finite(row.capex) && finite(row.dna));
@@ -185,7 +200,16 @@ function reconcileAnnualFinancials(extracted, yahooFinancials, needs = reconcili
     notes.push("SEC current debt was unavailable; Yahoo current debt was used for the near-term solvency check.");
   }
 
-  return { extracted: next, notes, capexReconciled, sbcReconciled, shortDebtReconciled };
+  if (needs.nwcMissing) {
+    for (const key of ["accountsReceivable", "inventory", "prepaidExpenses", "accountsPayable", "accruedExpenses"]) {
+      const before = next.series[key]?.values?.size || 0;
+      next.series[key] = mergeAnnualSeries(next.series[key], yahooFinancials?.series?.[key]);
+      if ((next.series[key]?.values?.size || 0) > before) nwcReconciled = true;
+    }
+    if (nwcReconciled) notes.push("Missing operating working-capital components were filled from Yahoo annual balance-sheet history where available.");
+  }
+
+  return { extracted: next, notes, capexReconciled, sbcReconciled, shortDebtReconciled, nwcReconciled };
 }
 
 function normalize(rows, maxYears = null) {
@@ -618,7 +642,8 @@ async function analyzeTicker(rawTicker, options = {}) {
     capexReconciled: false,
     capexReliable: true,
     sbcReconciled: false,
-    shortDebtReconciled: false
+    shortDebtReconciled: false,
+    nwcReconciled: false
   };
   if (financialSource === "SEC Company Facts") {
     const initialNeeds = reconciliationNeeds(extracted, options.includeDetail === true);
@@ -651,6 +676,7 @@ async function analyzeTicker(rawTicker, options = {}) {
       dataReconciliation.capexReconciled = reconciled.capexReconciled;
       dataReconciliation.sbcReconciled ||= reconciled.sbcReconciled;
       dataReconciliation.shortDebtReconciled = reconciled.shortDebtReconciled;
+      dataReconciliation.nwcReconciled = reconciled.nwcReconciled;
     }
     dataReconciliation.capexReliable = !dataReconciliation.capexSuspicious || dataReconciliation.capexReconciled;
   }
@@ -686,6 +712,13 @@ async function analyzeTicker(rawTicker, options = {}) {
       netIncome: finite(r.netIncome) ? r.netIncome * fxRate : null,
       currentAssets: finite(r.currentAssets) ? r.currentAssets * fxRate : null,
       currentLiabilities: finite(r.currentLiabilities) ? r.currentLiabilities * fxRate : null,
+      accountsReceivable: finite(r.accountsReceivable) ? r.accountsReceivable * fxRate : null,
+      inventory: finite(r.inventory) ? r.inventory * fxRate : null,
+      prepaidExpenses: finite(r.prepaidExpenses) ? r.prepaidExpenses * fxRate : null,
+      accountsPayable: finite(r.accountsPayable) ? r.accountsPayable * fxRate : null,
+      accruedExpenses: finite(r.accruedExpenses) ? r.accruedExpenses * fxRate : null,
+      operatingCurrentAssets: finite(r.operatingCurrentAssets) ? r.operatingCurrentAssets * fxRate : null,
+      operatingCurrentLiabilities: finite(r.operatingCurrentLiabilities) ? r.operatingCurrentLiabilities * fxRate : null,
       historicalCash: finite(r.historicalCash) ? r.historicalCash * fxRate : null,
       historicalShortDebt: finite(r.historicalShortDebt) ? r.historicalShortDebt * fxRate : null,
       netWorkingCapital: finite(r.netWorkingCapital) ? r.netWorkingCapital * fxRate : null,
@@ -737,10 +770,25 @@ async function analyzeTicker(rawTicker, options = {}) {
   const balanceSheet = reconcileBalanceSheet(extracted.latest, quoteResult, fxRate);
   const debt = balanceSheet.debt;
   const cash = balanceSheet.cash;
+  const secPreferredStock = finite(extracted.latest.preferredStock?.val) ? extracted.latest.preferredStock.val * fxRate : null;
+  const secMinorityInterest = finite(extracted.latest.minorityInterest?.val) ? extracted.latest.minorityInterest.val * fxRate : null;
+  const preferredStock = finite(quoteResult?.preferredStock) ? quoteResult.preferredStock : secPreferredStock;
+  const minorityInterest = finite(quoteResult?.minorityInterest) ? quoteResult.minorityInterest : secMinorityInterest;
+  const preferredStockSource = finite(quoteResult?.preferredStock) ? "Yahoo Finance quarterly balance sheet"
+    : finite(secPreferredStock) ? "SEC Company Facts" : "Unavailable — review required";
+  const minorityInterestSource = finite(quoteResult?.minorityInterest) ? "Yahoo Finance quarterly balance sheet"
+    : finite(secMinorityInterest) ? "SEC Company Facts" : "Unavailable — review required";
   const rawShortDebt = extracted.latest.shortDebt?.val;
   const shortDebt = finite(rawShortDebt) ? rawShortDebt * fxRate : null;
   const netDebt = finite(debt) && finite(cash) ? debt - cash : null;
   const enterpriseValue = finite(marketCap) && finite(netDebt) ? marketCap + netDebt : null;
+  const explicitNonOperatingAssets = finite(quoteResult?.otherNonOperatingAssets) ? quoteResult.otherNonOperatingAssets : null;
+  const impliedNonOperatingAssets = finite(quoteResult?.enterpriseValue) && finite(marketCap) && finite(debt) && finite(cash)
+    ? Math.max(0, marketCap + debt + (finite(preferredStock) ? preferredStock : 0) + (finite(minorityInterest) ? minorityInterest : 0) - cash - quoteResult.enterpriseValue)
+    : null;
+  const otherNonOperatingAssets = explicitNonOperatingAssets ?? impliedNonOperatingAssets;
+  const otherNonOperatingAssetsSource = finite(explicitNonOperatingAssets) ? "Yahoo Finance long-term investments"
+    : finite(impliedNonOperatingAssets) ? "Implied from Yahoo Finance enterprise value" : "Unavailable — review required";
 
   // Normalize interest over the same lookback as FCF before the after-tax add-back.
   const taxRate = 0.21;
@@ -769,6 +817,8 @@ async function analyzeTicker(rawTicker, options = {}) {
   const valuation = {
     price, shares: effectiveShares, shareSource: yahooMarketCap ? "Yahoo Finance market cap ÷ price" : shareSelection.source, marketCap, marketCapSource,
     debt, debtSource: balanceSheet.debtSource, shortDebt, cash, cashSource: balanceSheet.cashSource, netDebt, enterpriseValue,
+    preferredStock, preferredStockSource, minorityInterest, minorityInterestSource,
+    otherNonOperatingAssets, otherNonOperatingAssetsSource,
     ...fullValuation,
     lookbacks,
     evToNfcf: finite(enterpriseValue) && finite(normalized.normalizedFcf) && normalized.normalizedFcf > 0 ? enterpriseValue / normalized.normalizedFcf : null,
@@ -953,6 +1003,9 @@ async function analyzeTicker(rawTicker, options = {}) {
       marketCap: marketCapSource,
       debt: balanceSheet.debtSource,
       cash: balanceSheet.cashSource,
+      preferredStock: preferredStockSource,
+      minorityInterest: minorityInterestSource,
+      otherNonOperatingAssets: otherNonOperatingAssetsSource,
       dividends: dividends.source,
       insiders: insiders.source,
       financialTags: Object.fromEntries(Object.entries(extracted.series).map(([key, value]) => [key, value.tag]))
