@@ -228,6 +228,29 @@
     </section>
   </main>
 
+  <!-- DEEP ANALYSIS CHOOSER -->
+  <div id="deep-analysis-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="deep-analysis-title">
+    <div class="modal-backdrop" id="deep-analysis-backdrop"></div>
+    <div class="modal-card deep-analysis-modal-card">
+      <div class="calc-head">
+        <div><span class="calc-kicker">Choose an analysis path</span><h2 id="deep-analysis-title">Deep Analysis</h2></div>
+        <button type="button" class="btn-close" id="deep-analysis-close" aria-label="Close">✕</button>
+      </div>
+      <div class="deep-analysis-body">
+        <p id="deep-analysis-company" class="muted"></p>
+        <div class="analysis-choice-grid">
+          <button id="choose-ai-analysis" class="analysis-choice" type="button">
+            <span class="choice-icon">✦</span><span><strong>AI Deep Analysis</strong><small>Investigate filings, current developments, risks, catalysts, and scenarios with linked sources.</small></span><b>Start AI research →</b>
+          </button>
+          <a id="choose-financial-analysis" class="analysis-choice" href="/financial-analysis" target="_blank" rel="noopener">
+            <span class="choice-icon">ƒ</span><span><strong>Financial Deep Analysis</strong><small>Analyze historical changes, test forecast methods, build cases, and complete an EBIT-based DCF.</small></span><b>Open financial model →</b>
+          </a>
+        </div>
+        <p class="deep-analysis-note">Both analysis paths use the currently loaded ClearFCF company data. Financial Deep Analysis opens as a dedicated workspace.</p>
+      </div>
+    </div>
+  </div>
+
   <!-- CALCULATION BREAKDOWN MODAL -->
   <div id="calc-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Calculation Breakdown">
     <div class="modal-backdrop" id="calc-backdrop"></div>

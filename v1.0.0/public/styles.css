@@ -758,6 +758,16 @@ tbody tr:hover { background: var(--green-tint); box-shadow: inset 4px 0 0 var(--
 .modal-backdrop { position: absolute; inset: 0; background: rgba(26, 35, 31, 0.45); backdrop-filter: blur(3px); animation: backdropFade var(--motion-base) ease-out; }
 .modal-card { position: relative; background: var(--card); border: 1px solid var(--line-strong); border-radius: var(--radius-l); width: 100%; max-width: 560px; box-shadow: var(--shadow-float); overflow: hidden; animation: modalPop 300ms var(--ease-out); }
 .settings-modal-card { max-width: 680px; }
+.deep-analysis-modal-card { max-width: 790px; }
+.deep-analysis-body { padding: 0 24px 24px; }
+.analysis-choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 18px; }
+.analysis-choice { min-height: 230px; padding: 22px; border: 1px solid var(--line-strong); border-radius: var(--radius-m); background: var(--paper); color: var(--ink); text-align: left; text-decoration: none; display: flex; flex-direction: column; align-items: flex-start; gap: 16px; box-shadow: none; }
+.analysis-choice:hover { border-color: var(--accent); background: var(--accent-soft); transform: translateY(-2px); }
+.analysis-choice .choice-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: var(--accent); color: white; font-family: Georgia, serif; font-size: 20px; }
+.analysis-choice strong { display: block; font-family: Georgia, serif; font-size: 22px; margin-bottom: 8px; }
+.analysis-choice small { display: block; color: var(--muted); line-height: 1.55; font-weight: 500; }
+.analysis-choice b { margin-top: auto; color: var(--accent); font-size: 13px; }
+.deep-analysis-note { margin: 16px 0 0; color: var(--muted); font-size: 12px; }
 .settings-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 22px 24px 16px; border-bottom: 1px solid var(--line); }
 .settings-head h2 { margin: 3px 0 0; font: 500 25px/1.2 var(--serif); }
 .settings-body { padding: 20px 24px 24px; }
@@ -875,7 +885,7 @@ tbody tr:hover { background: var(--green-tint); box-shadow: inset 4px 0 0 var(--
   @page { size: A4; margin: 11mm; }
   html, body { height: auto !important; min-height: 0 !important; overflow: visible !important; }
   body { display: block !important; background: white !important; color: black !important; font-size: 10pt !important; background-image: none !important; }
-  .site-header, .app-footer, #status, nav, .finder-panel, .seen-bar, .filter-chips, .toolbar-panel, .memo-btn, .deep-research-btn, .research-config, #cmd-palette, .nav-button, .cmd-hint, .tolerances-drawer, .scan-dashboard {
+  .site-header, .app-footer, #status, nav, .finder-panel, .seen-bar, .filter-chips, .toolbar-panel, .memo-btn, .deep-analysis-btn, .deep-research-btn, .research-config, #cmd-palette, .nav-button, .cmd-hint, .tolerances-drawer, .scan-dashboard {
     display: none !important;
   }
   main { padding: 0 !important; max-width: 100% !important; margin: 0 !important; }
@@ -923,6 +933,10 @@ tbody tr:hover { background: var(--green-tint); box-shadow: inset 4px 0 0 var(--
 
 /* ---------- calculation modal ---------- */
 .calc-modal-card { max-width: 600px; background: var(--card); border-radius: var(--radius-l); box-shadow: var(--shadow-float); overflow: hidden; }
+@media (max-width: 700px) {
+  .analysis-choice-grid { grid-template-columns: 1fr; }
+  .analysis-choice { min-height: 190px; }
+}
 .calc-head { display: flex; justify-content: space-between; align-items: flex-start; padding: 20px 24px; border-bottom: 1px solid var(--line); background: var(--paper-2); }
 .calc-kicker { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: var(--green); text-transform: uppercase; display: block; margin-bottom: 4px; font-family: var(--mono); }
 .calc-head h2 { font: 500 22px/1.2 var(--serif); margin: 0; color: var(--ink); }

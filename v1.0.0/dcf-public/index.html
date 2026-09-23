@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f5f3ee">
+  <title>ClearFCF Financial Deep Analysis</title>
+  <link rel="icon" href="/icon-mark.png">
+  <link rel="stylesheet" href="/financial-analysis/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><a class="brand-home" href="/" aria-label="Back to ClearFCF"><img src="/logo-trimmed.png" alt="ClearFCF"></a><span>Financial Deep Analysis</span><a class="back-link" href="/">← Screener</a></div>
+    <form id="ticker-form" class="ticker-form">
+      <label for="ticker">Company ticker</label>
+      <div><input id="ticker" name="ticker" value="AAPL" maxlength="12" autocomplete="off" spellcheck="false"><button type="submit">Load SEC data</button></div>
+    </form>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div><p class="eyebrow">Evidence → forecast → valuation</p><h1>Financial Deep Analysis</h1><p>Understand historical changes, test forecasting methods, build an operating forecast, and value the company with an EBIT-based DCF.</p></div>
+      <div id="company-chip" class="company-chip muted">Load a ticker to begin</div>
+    </section>
+
+    <section class="controls panel">
+      <label>Historical years<select id="historical-years"></select></label>
+      <label>Forecast years<select id="forecast-years"></select></label>
+      <label>Discount convention<select id="discount-convention"><option value="year-end">Year-end</option><option value="mid-year">Mid-year</option></select></label>
+      <button id="refresh-sec" class="secondary" type="button" disabled>Refresh SEC data</button>
+      <button id="auto-all" class="secondary" type="button" disabled>Rebuild all cases</button>
+      <span id="save-state" class="save-state">Changes save locally</span>
+    </section>
+
+    <nav class="analysis-nav panel" aria-label="Financial deep analysis sections">
+      <a href="#history">History</a><a href="#forecast">Forecast</a><a href="#backtest">Backtest</a><a href="#dcf">DCF</a><a href="#quality">Quality</a><a href="#review">Review</a>
+    </nav>
+
+    <div id="message" class="message hidden" role="status"></div>
+    <div id="empty" class="empty panel"><div class="empty-mark">DCF</div><h2>Load a company to start</h2><p>Historical values will be populated from the existing ClearFCF SEC analysis. Forecasts are generated transparently and remain fully editable.</p></div>
+
+    <div id="workspace" class="hidden">
+      <nav class="case-tabs" aria-label="DCF scenario">
+        <button data-case="bear" type="button">Bear</button>
+        <button data-case="base" class="active" type="button">Base</button>
+        <button data-case="bull" type="button">Bull</button>
+      </nav>
+
+      <section id="history" class="section-head"><div><span>01</span><div><p class="eyebrow">Performance history</p><h2>Growth, changes, and margins</h2></div></div><p>Reported values and calculated year-over-year changes reveal the operating pattern behind the forecast.</p></section>
+      <section id="trend-table" class="panel table-panel"></section>
+
+      <section class="section-head"><div><span>02</span><div><p class="eyebrow">Source history</p><h2>Historical operating model</h2></div></div><p>Reported values from SEC Company Facts. Hover a value to inspect its source concept.</p></section>
+      <section id="historical-table" class="panel table-panel"></section>
+
+      <section id="forecast" class="section-head"><div><span>03</span><div><p class="eyebrow">Forecast methodology</p><h2>Forecast drivers</h2></div></div><p>Choose an explicit historical method. Every generated number stays editable.</p></section>
+      <section id="driver-card" class="panel"></section>
+
+      <section class="section-head"><div><span>04</span><div><p class="eyebrow">Case assumptions</p><h2 id="forecast-title">Base forecast</h2></div></div><div class="section-actions"><button id="auto-case" type="button" class="secondary">Rebuild this case</button></div></section>
+      <section id="forecast-table" class="panel table-panel"></section>
+
+      <section id="backtest" class="section-head"><div><span>05</span><div><p class="eyebrow">Forecast discipline</p><h2>Historical backtest</h2></div></div><p>Tests the selected revenue and EBIT-margin methods using only information available before each historical year.</p></section>
+      <section id="backtest-card" class="panel table-panel"></section>
+
+      <div id="dcf" class="two-column">
+        <div>
+          <section class="section-head compact"><div><span>06</span><div><p class="eyebrow">Discount rate</p><h2>WACC</h2></div></div></section>
+          <section id="wacc-card" class="panel"></section>
+        </div>
+        <div>
+          <section class="section-head compact"><div><span>07</span><div><p class="eyebrow">Continuing value</p><h2>Terminal value</h2></div></div></section>
+          <section id="terminal-card" class="panel"></section>
+        </div>
+      </div>
+
+      <section class="section-head"><div><span>08</span><div><p class="eyebrow">Valuation bridge</p><h2>Enterprise value to equity value</h2></div></div><p>Balance-sheet values are initially populated from ClearFCF and can be overridden.</p></section>
+      <section id="bridge-card" class="panel"></section>
+      <section id="valuation-output" class="output-grid"></section>
+
+      <section class="section-head"><div><span>09</span><div><p class="eyebrow">Cross-check</p><h2>Scenario comparison</h2></div></div></section>
+      <section id="comparison" class="panel table-panel"></section>
+
+      <section class="section-head"><div><span>10</span><div><p class="eyebrow">Range of outcomes</p><h2>Sensitivity</h2></div></div><p id="sensitivity-description"></p></section>
+      <section id="sensitivity" class="panel table-panel"></section>
+
+      <section id="quality" class="section-head"><div><span>11</span><div><p class="eyebrow">Operating diagnostics</p><h2>Earnings quality and capital allocation</h2></div></div><p>Cash conversion, reinvestment, dilution, and owner returns provide context for forecast assumptions.</p></section>
+      <section id="quality-card" class="panel table-panel"></section>
+
+      <section class="section-head"><div><span>12</span><div><p class="eyebrow">Audit trail</p><h2>Sources and model checks</h2></div></div></section>
+      <section id="audit" class="panel"></section>
+
+      <section id="review" class="section-head"><div><span>13</span><div><p class="eyebrow">Forecast scorekeeping</p><h2>Saved snapshots</h2></div></div><div class="section-actions"><button id="save-snapshot" type="button">Save current forecast</button></div></section>
+      <section id="snapshot-card" class="panel"></section>
+    </div>
+  </main>
+  <script src="/financial-analysis/engine.js"></script>
+  <script src="/financial-analysis/app.js"></script>
+</body>
+</html>

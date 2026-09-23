@@ -22,7 +22,21 @@ function resolvePublicDir() {
   return path.join(__dirname, "public");
 }
 
+function resolveFinancialPublicDir() {
+  const candidates = [
+    path.join(__dirname, "dcf-public"),
+    path.join(process.cwd(), "dcf-public"),
+    path.join(__dirname, "v1.0.0", "dcf-public"),
+    path.join(process.cwd(), "v1.0.0", "dcf-public")
+  ];
+  for (const dir of candidates) {
+    if (fs.existsSync(dir)) return dir;
+  }
+  return path.join(__dirname, "dcf-public");
+}
+
 const publicDir = resolvePublicDir();
+const financialPublicDir = resolveFinancialPublicDir();
 const handlers = {
   "/api/analyze": analyze,
   "/api/screen": screen,
@@ -69,10 +83,18 @@ function createAppServer() {
       "/logo-trimmed.png": "logo-trimmed.png",
       "/icon-mark.png": "icon-mark.png"
     };
-    const name = names[url.pathname];
+    const financialNames = {
+      "/financial-analysis": "index.html",
+      "/financial-analysis/": "index.html",
+      "/financial-analysis/app.js": "app.js",
+      "/financial-analysis/engine.js": "engine.js",
+      "/financial-analysis/styles.css": "styles.css"
+    };
+    const financialName = financialNames[url.pathname];
+    const name = financialName || names[url.pathname];
     if (!name) { rawRes.statusCode = 404; return rawRes.end("Not found"); }
 
-    const filePath = path.resolve(publicDir, name);
+    const filePath = path.resolve(financialName ? financialPublicDir : publicDir, name);
     if (!fs.existsSync(filePath)) {
       rawRes.statusCode = 404;
       return rawRes.end("Not found: " + name);
@@ -85,6 +107,7 @@ function createAppServer() {
       : name.endsWith(".ico") ? "image/x-icon"
       : "text/html";
     rawRes.setHeader("Content-Type", type);
+    if (financialName) rawRes.setHeader("Cache-Control", "no-store");
     const stream = fs.createReadStream(filePath);
     stream.on("error", () => {
       rawRes.statusCode = 500;

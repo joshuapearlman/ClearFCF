@@ -309,6 +309,11 @@ async function fetchYahooFinancials(ticker) {
   const empty = (tag) => ({ values: new Map(), taxonomy: "yahoo-finance", tag, label: tag, unit: "USD" });
   const series = {
     revenue: yahooSeries(byType, "annualTotalRevenue"),
+    grossProfit: yahooSeries(byType, "annualGrossProfit"),
+    operatingIncome: yahooSeries(byType, "annualOperatingIncome"),
+    pretaxIncome: yahooSeries(byType, "annualPretaxIncome"),
+    incomeTaxExpense: yahooSeries(byType, "annualTaxProvision"),
+    netIncome: yahooSeries(byType, "annualNetIncome"),
     ocf: yahooSeries(byType, "annualOperatingCashFlow"),
     capex: yahooSeries(byType, "annualCapitalExpenditure"),
     acquiredIntangibles: yahooSeries(byType, "annualPurchaseOfIntangibles"),
