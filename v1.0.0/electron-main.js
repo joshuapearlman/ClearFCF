@@ -86,12 +86,29 @@ async function createWindow() {
     });
 
     mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
-      let safe = false;
       try {
         const parsed = new URL(targetUrl);
-        safe = parsed.protocol === "https:";
+        const appUrl = new URL(mainWindow.webContents.getURL());
+        if (parsed.origin === appUrl.origin && parsed.pathname === "/financial-analysis") {
+          return {
+            action: "allow",
+            overrideBrowserWindowOptions: {
+              width: 1440,
+              height: 900,
+              minWidth: 980,
+              minHeight: 700,
+              title: "ClearFCF Financial Deep Analysis",
+              backgroundColor: "#f4f1ea",
+              webPreferences: {
+                contextIsolation: true,
+                nodeIntegration: false,
+                sandbox: true
+              }
+            }
+          };
+        }
+        if (parsed.protocol === "https:") shell.openExternal(targetUrl);
       } catch {}
-      if (safe) shell.openExternal(targetUrl);
       return { action: "deny" };
     });
 

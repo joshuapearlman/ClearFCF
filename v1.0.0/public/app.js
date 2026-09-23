@@ -823,7 +823,7 @@ function renderResearchResult(result) {
     <div class="research-header">
       <div>
         <p class="kicker">AI-assisted, source-linked investigation</p>
-        <h3>Deep Research</h3>
+        <h3>AI Deep Analysis</h3>
         <p class="muted">Generated ${escapeHtml(result.generatedAt ? new Date(result.generatedAt).toLocaleString() : "date unavailable")}${result.researchConfiguration ? ` with ${escapeHtml(result.researchConfiguration.model)} at ${escapeHtml(result.researchConfiguration.effort)} effort` : ""}. Verify consequential claims in the linked originals.</p>
       </div>
       <div class="research-verdicts">
@@ -892,7 +892,7 @@ function renderResearchPanel(ticker) {
   if (job && !["completed"].includes(job.status)) {
     const failed = ["failed", "cancelled"].includes(job.status);
     return `<div class="report-card deep-research-progress ${failed ? "research-failed" : ""}">
-      <div class="research-progress-head"><div><p class="kicker">Deep Research</p><h3>${escapeHtml(job.message || "Preparing research…")}</h3></div><strong>${escapeHtml(job.progress || 0)}%</strong></div>
+      <div class="research-progress-head"><div><p class="kicker">AI Deep Analysis</p><h3>${escapeHtml(job.message || "Preparing research…")}</h3></div><strong>${escapeHtml(job.progress || 0)}%</strong></div>
       <div class="research-progress-track"><span style="width:${Math.max(0, Math.min(100, Number(job.progress) || 0))}%"></span></div>
       ${job.model ? `<p class="research-run-config">${escapeHtml(job.model)} • ${escapeHtml(job.effort || "default")} effort</p>` : ""}
       ${job.error ? `<p class="research-error">${escapeHtml(job.error)}</p>` : `<p class="muted">${job.status === "signing-in" ? "Finish signing in with ChatGPT in the browser window." : "This can take several minutes. You can continue using ClearFCF while it runs."}</p>`}
@@ -938,7 +938,7 @@ function renderReport(report) {
       </div>
       <div class="report-actions">
         ${researchSettingsMarkup()}
-        <button type="button" class="btn primary deep-research-btn" data-ticker="${escapeHtml(report.ticker)}">✦ ${state.researchReports[report.ticker] ? "Refresh Research" : "Deep Research"}</button>
+        <button type="button" class="btn primary deep-analysis-btn" data-ticker="${escapeHtml(report.ticker)}">✦ Deep Analysis</button>
         <button type="button" class="btn secondary memo-btn" data-ticker="${escapeHtml(report.ticker)}">↓ Save PDF</button>
         <span class="badge ${String(evaluation.status).toLowerCase()}">${escapeHtml(evaluation.status)}</span>
       </div>
@@ -1705,7 +1705,7 @@ async function ensureResearchAuthentication(ticker) {
     const refreshed = await request(`/api/research?action=status&force=1&_t=${Date.now()}`);
     if (refreshed.authenticated) return;
   }
-  throw new Error("ChatGPT sign-in was not completed within three minutes. Try Deep Research again when ready.");
+  throw new Error("ChatGPT sign-in was not completed within three minutes. Try AI Deep Analysis again when ready.");
 }
 
 async function pollResearchJob(ticker, jobId) {
@@ -1722,7 +1722,7 @@ async function pollResearchJob(ticker, jobId) {
       });
       delete state.researchJobs[ticker];
       updateResearchPanel(ticker);
-      setStatus(`${ticker} deep research complete.`);
+      setStatus(`${ticker} AI deep analysis complete.`);
       return;
     }
     if (["failed", "cancelled"].includes(job.status)) {
@@ -1736,7 +1736,7 @@ async function pollResearchJob(ticker, jobId) {
 
 async function startDeepResearch(ticker) {
   const report = state.reports[ticker];
-  if (!report) return setStatus("Load a company report before starting deep research.", true);
+  if (!report) return setStatus("Load a company report before starting AI deep analysis.", true);
   const current = state.researchJobs[ticker];
   if (current && !["failed", "cancelled"].includes(current.status)) return;
 
@@ -1757,7 +1757,7 @@ async function startDeepResearch(ticker) {
     });
     state.researchJobs[ticker] = job;
     updateResearchPanel(ticker);
-    setStatus(`${ticker} deep research is running.`);
+    setStatus(`${ticker} AI deep analysis is running.`);
     await pollResearchJob(ticker, job.id);
   } catch (error) {
     state.researchJobs[ticker] = { status: "failed", message: "Deep research could not start.", progress: 0, error: error.message };
@@ -1821,7 +1821,38 @@ $("#report")?.addEventListener("change", (event) => {
   saveResearchSettings();
 });
 
+function closeDeepAnalysisModal() {
+  const modal = $("#deep-analysis-modal");
+  modal?.classList.add("hidden");
+  modal?._returnFocus?.focus?.();
+}
+
+function openDeepAnalysisModal(ticker, returnFocus) {
+  const modal = $("#deep-analysis-modal");
+  if (!modal) return;
+  modal.dataset.ticker = ticker;
+  modal._returnFocus = returnFocus;
+  $("#deep-analysis-company").textContent = `Choose how you want to analyze ${ticker}. Both paths remain under Deep Analysis.`;
+  $("#choose-financial-analysis").href = `/financial-analysis?ticker=${encodeURIComponent(ticker)}`;
+  modal.classList.remove("hidden");
+  $("#choose-ai-analysis")?.focus();
+}
+
+$("#deep-analysis-backdrop")?.addEventListener("click", closeDeepAnalysisModal);
+$("#deep-analysis-close")?.addEventListener("click", closeDeepAnalysisModal);
+$("#choose-ai-analysis")?.addEventListener("click", () => {
+  const ticker = $("#deep-analysis-modal")?.dataset.ticker;
+  closeDeepAnalysisModal();
+  if (ticker) void startDeepResearch(ticker);
+});
+$("#choose-financial-analysis")?.addEventListener("click", closeDeepAnalysisModal);
+
 $("#report")?.addEventListener("click", (event) => {
+  const analysisButton = event.target.closest(".deep-analysis-btn[data-ticker]");
+  if (analysisButton) {
+    openDeepAnalysisModal(analysisButton.dataset.ticker, analysisButton);
+    return;
+  }
   const researchButton = event.target.closest(".deep-research-btn[data-ticker]");
   if (researchButton) {
     void startDeepResearch(researchButton.dataset.ticker);
@@ -1854,6 +1885,10 @@ $("#calc-backdrop")?.addEventListener("click", closeCalculationModal);
 $("#calc-close-btn")?.addEventListener("click", closeCalculationModal);
 
 window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("#deep-analysis-modal")?.classList.contains("hidden")) {
+    closeDeepAnalysisModal();
+    return;
+  }
   if (e.key === "Escape" && !$("#calc-modal")?.classList.contains("hidden")) {
     closeCalculationModal();
   }

@@ -10,6 +10,7 @@
   "scripts": {
     "test": "node --test",
     "start": "node server.js",
+    "dcf": "node dcf-server.js",
     "app": "electron electron-main.js",
     "build:mac": "electron-builder --mac",
     "publish:mac": "electron-builder --mac --publish always",
@@ -42,6 +43,7 @@
     },
     "files": [
       "api/**/*",
+      "dcf-public/**/*",
       "lib/**/*",
       "public/**/*",
       "desktop-server.js",

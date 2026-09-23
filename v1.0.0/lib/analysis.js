@@ -32,8 +32,14 @@ function annualRows(extracted) {
       for (const year of series.values.keys()) years.add(year);
     }
   }
-  return [...years].sort((a, b) => b - a).slice(0, 10).map((year) => {
+  const rows = [...years].sort((a, b) => b - a).slice(0, 10).map((year) => {
     const revenue = valueForYear(extracted.series.revenue, year);
+    const grossProfit = valueForYear(extracted.series.grossProfit, year);
+    const ebit = valueForYear(extracted.series.operatingIncome, year);
+    const pretaxIncome = valueForYear(extracted.series.pretaxIncome, year);
+    const incomeTaxExpenseRaw = valueForYear(extracted.series.incomeTaxExpense, year);
+    const incomeTaxExpense = finite(incomeTaxExpenseRaw) ? Math.abs(incomeTaxExpenseRaw) : null;
+    const netIncome = valueForYear(extracted.series.netIncome, year);
     const ocf = valueForYear(extracted.series.ocf, year);
     const capexTangibleRaw = valueForYear(extracted.series.capex, year);
     const capexIntangibleRaw = valueForYear(extracted.series.intangibleCapex, year);
@@ -55,12 +61,24 @@ function annualRows(extracted) {
     const buybackShares = finite(buybackSharesRaw) ? Math.abs(buybackSharesRaw) : null;
     const dividendsPaidRaw = valueForYear(extracted.series.dividendsPaid, year);
     const dividendsPaid = finite(dividendsPaidRaw) ? Math.abs(dividendsPaidRaw) : null;
+    const currentAssets = valueForYear(extracted.series.currentAssets, year);
+    const currentLiabilities = valueForYear(extracted.series.currentLiabilities, year);
+    const historicalCash = valueForYear(extracted.series.historicalCash, year);
+    const historicalShortDebt = valueForYear(extracted.series.historicalShortDebt, year);
+    const netWorkingCapital = finite(currentAssets) && finite(currentLiabilities)
+      ? currentAssets - (finite(historicalCash) ? historicalCash : 0) - currentLiabilities + (finite(historicalShortDebt) ? historicalShortDebt : 0)
+      : null;
+    const effectiveTaxRate = finite(incomeTaxExpense) && finite(pretaxIncome) && pretaxIncome > 0
+      ? incomeTaxExpense / pretaxIncome
+      : null;
 
     const fcf = finite(ocf) && finite(capex) ? ocf - capex : null;
     const fcfEconomic = finite(fcf) && finite(sbc) ? fcf - sbc : null;
 
     return {
-      year, revenue, ocf, capex, capexTangible, capexIntangible, dna, interest, sbc, shares, shareBasis,
+      year, revenue, grossProfit, ebit, pretaxIncome, incomeTaxExpense, effectiveTaxRate, netIncome,
+      currentAssets, currentLiabilities, historicalCash, historicalShortDebt, netWorkingCapital,
+      ocf, capex, capexTangible, capexIntangible, dna, interest, sbc, shares, shareBasis,
       fcf,
       fcfEconomic,
       buybackCash,
@@ -75,6 +93,13 @@ function annualRows(extracted) {
       evidence: Object.fromEntries(Object.entries(extracted.series).map(([key, series]) => [key, evidenceForYear(series, year)]))
     };
   });
+  for (let index = 0; index < rows.length; index += 1) {
+    const prior = rows[index + 1];
+    rows[index].changeInNwc = finite(rows[index].netWorkingCapital) && finite(prior?.netWorkingCapital)
+      ? rows[index].netWorkingCapital - prior.netWorkingCapital
+      : null;
+  }
+  return rows;
 }
 
 function cloneSeries(series, fallbackTag = "Unavailable") {
@@ -654,6 +679,17 @@ async function analyzeTicker(rawTicker, options = {}) {
     rows = rows.map((r) => ({
       ...r,
       revenue: finite(r.revenue) ? r.revenue * fxRate : null,
+      grossProfit: finite(r.grossProfit) ? r.grossProfit * fxRate : null,
+      ebit: finite(r.ebit) ? r.ebit * fxRate : null,
+      pretaxIncome: finite(r.pretaxIncome) ? r.pretaxIncome * fxRate : null,
+      incomeTaxExpense: finite(r.incomeTaxExpense) ? r.incomeTaxExpense * fxRate : null,
+      netIncome: finite(r.netIncome) ? r.netIncome * fxRate : null,
+      currentAssets: finite(r.currentAssets) ? r.currentAssets * fxRate : null,
+      currentLiabilities: finite(r.currentLiabilities) ? r.currentLiabilities * fxRate : null,
+      historicalCash: finite(r.historicalCash) ? r.historicalCash * fxRate : null,
+      historicalShortDebt: finite(r.historicalShortDebt) ? r.historicalShortDebt * fxRate : null,
+      netWorkingCapital: finite(r.netWorkingCapital) ? r.netWorkingCapital * fxRate : null,
+      changeInNwc: finite(r.changeInNwc) ? r.changeInNwc * fxRate : null,
       ocf: finite(r.ocf) ? r.ocf * fxRate : null,
       capex: finite(r.capex) ? r.capex * fxRate : null,
       capexTangible: finite(r.capexTangible) ? r.capexTangible * fxRate : null,

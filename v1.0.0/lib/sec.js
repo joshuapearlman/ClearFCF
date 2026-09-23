@@ -16,6 +16,20 @@ const TAGS = {
     "RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet",
     "SalesRevenueGoodsNet", "SalesRevenueServicesNet", "Revenue"
   ],
+  grossProfit: ["GrossProfit"],
+  operatingIncome: [
+    "OperatingIncomeLoss", "ProfitLossFromOperatingActivities"
+  ],
+  pretaxIncome: [
+    "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+    "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+    "IncomeLossFromContinuingOperationsBeforeIncomeTaxesDomestic",
+    "ProfitLossBeforeTax"
+  ],
+  incomeTaxExpense: [
+    "IncomeTaxExpenseBenefit", "IncomeTaxExpenseContinuingOperations", "IncomeTaxExpense"
+  ],
+  netIncome: ["NetIncomeLoss", "ProfitLoss", "NetIncomeLossAvailableToCommonStockholdersBasic"],
   ocf: ["NetCashProvidedByUsedInOperatingActivities", "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"],
   capex: [
     "PaymentsToAcquirePropertyPlantAndEquipment",
@@ -62,6 +76,16 @@ const TAGS = {
   dividendsPaid: [
     "PaymentsOfDividends", "PaymentsOfDividendsCommonStock", "PaymentsOfOrdinaryDividends",
     "DividendsCommonStockCash", "PaymentsOfDividendsMinorityInterest"
+  ],
+  currentAssets: ["AssetsCurrent", "CurrentAssets"],
+  currentLiabilities: ["LiabilitiesCurrent", "CurrentLiabilities"],
+  historicalCash: [
+    "CashCashEquivalentsAndShortTermInvestments", "CashAndCashEquivalentsAtCarryingValue",
+    "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"
+  ],
+  historicalShortDebt: [
+    "ShortTermBorrowings", "ShortTermDebt", "DebtCurrent", "LongTermDebtCurrent",
+    "NotesPayableCurrent", "CommercialPaper"
   ]
 };
 
@@ -270,6 +294,46 @@ function bestAnnualSeries(facts, tags) {
   return { values: mergedValues, taxonomy: bestTaxonomy, tag: bestTag, label: bestLabel, unit: bestUnit };
 }
 
+function bestHistoricalInstantSeries(facts, tags) {
+  const mergedValues = new Map();
+  let bestTag = null;
+  let bestLabel = null;
+  let bestTaxonomy = null;
+  let bestUnit = "USD";
+
+  for (const tag of tags) {
+    for (const { taxonomy, concept } of allConcepts(facts, tag)) {
+      const candidates = factUnitsWithKey(concept, ["USD", "shares"]);
+      for (const fact of candidates.facts) {
+        if (!finite(fact.val) || !fact.end) continue;
+        if (!["10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"].includes(fact.form)) continue;
+        // Instant balance-sheet facts are keyed by the period end. A later 10-K often
+        // repeats the prior-year balance with the current filing's `fy`, so using `fy`
+        // would shift comparative balances forward by one year.
+        const fiscalYear = Number(String(fact.end).slice(0, 4));
+        if (!Number.isInteger(fiscalYear)) continue;
+        const current = mergedValues.get(fiscalYear);
+        if (!current || String(fact.filed || "") > String(current.filed || "")) {
+          mergedValues.set(fiscalYear, {
+            ...fact,
+            taxonomy,
+            tag,
+            label: concept.label || tag,
+            unit: candidates.unit
+          });
+          if (!bestTag) {
+            bestTag = tag;
+            bestLabel = concept.label || tag;
+            bestTaxonomy = taxonomy;
+            bestUnit = candidates.unit;
+          }
+        }
+      }
+    }
+  }
+  return { values: mergedValues, taxonomy: bestTaxonomy, tag: bestTag, label: bestLabel, unit: bestUnit };
+}
+
 function bestHistoricalShareSeries(facts) {
   const preferred = bestAnnualSeries(facts, TAGS.dilutedShares);
   for (const fact of preferred.values.values()) fact.shareBasis = "weighted-average diluted";
@@ -328,8 +392,11 @@ function latestInstant(facts, tags) {
 
 function extractFinancials(facts) {
   const series = {};
-  for (const key of ["revenue", "ocf", "capex", "intangibleCapex", "dna", "interestExpense", "sbc", "buybackCash", "buybackShares", "dividendsPaid"]) {
+  for (const key of ["revenue", "grossProfit", "operatingIncome", "pretaxIncome", "incomeTaxExpense", "netIncome", "ocf", "capex", "intangibleCapex", "dna", "interestExpense", "sbc", "buybackCash", "buybackShares", "dividendsPaid"]) {
     series[key] = bestAnnualSeries(facts, TAGS[key]);
+  }
+  for (const key of ["currentAssets", "currentLiabilities", "historicalCash", "historicalShortDebt"]) {
+    series[key] = bestHistoricalInstantSeries(facts, TAGS[key]);
   }
   series.dilutedShares = bestHistoricalShareSeries(facts);
   const cash = latestInstant(facts, TAGS.cash);
