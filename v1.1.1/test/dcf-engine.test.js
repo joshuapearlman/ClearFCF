@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const dcf = require("../dcf-public/engine");
+const dcf = require("../public/financial-analysis/engine");
 
 test("EBIT method calculates unlevered FCFF", () => {
   const result = dcf.calculateFcffYear({ ebit: 100, taxRate: 0.25, dna: 20, capex: 30, changeInNwc: 5 });

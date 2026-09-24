@@ -11,13 +11,13 @@ const read = (name) => fs.readFileSync(path.join(root, name), "utf8");
 test("Financial Deep Analysis is served by the main ClearFCF application", () => {
   const mainIndex = read("public/index.html");
   const mainApp = read("public/app.js");
-  const financialIndex = read("dcf-public/index.html");
+  const financialIndex = read("public/financial-analysis/index.html");
   const server = read("server.js");
   const desktopServer = read("desktop-server.js");
   const electronMain = read("electron-main.js");
   const packageJson = JSON.parse(read("package.json"));
   const vercel = JSON.parse(read("vercel.json"));
-  const financialApp = read("dcf-public/app.js");
+  const financialApp = read("public/financial-analysis/app.js");
 
   assert.match(mainIndex, /id="deep-analysis-modal"/);
   assert.match(mainIndex, /href="\/financial-analysis"/);
@@ -38,14 +38,14 @@ test("Financial Deep Analysis is served by the main ClearFCF application", () =>
     assert.match(source, /"\/financial-analysis\/app\.js": "app\.js"/);
     assert.match(source, /"\/financial-analysis\/engine\.js": "engine\.js"/);
   }
-  assert.ok(packageJson.build.files.includes("dcf-public/**/*"));
+  assert.ok(packageJson.build.files.includes("public/**/*"));
   assert.match(electronMain, /parsed\.pathname === "\/financial-analysis"/);
   assert.match(electronMain, /action: "allow"/);
 
   const rewrites = new Map(vercel.rewrites.map(({ source, destination }) => [source, destination]));
-  assert.equal(rewrites.get("/financial-analysis"), "/dcf-public/index.html");
-  assert.equal(rewrites.get("/financial-analysis/"), "/dcf-public/index.html");
-  assert.equal(rewrites.get("/financial-analysis/app.js"), "/dcf-public/app.js");
-  assert.equal(rewrites.get("/financial-analysis/engine.js"), "/dcf-public/engine.js");
-  assert.equal(rewrites.get("/financial-analysis/styles.css"), "/dcf-public/styles.css");
+  assert.equal(rewrites.get("/financial-analysis"), "/public/financial-analysis/index.html");
+  assert.equal(rewrites.get("/financial-analysis/"), "/public/financial-analysis/index.html");
+  assert.equal(rewrites.get("/financial-analysis/app.js"), "/public/financial-analysis/app.js");
+  assert.equal(rewrites.get("/financial-analysis/engine.js"), "/public/financial-analysis/engine.js");
+  assert.equal(rewrites.get("/financial-analysis/styles.css"), "/public/financial-analysis/styles.css");
 });

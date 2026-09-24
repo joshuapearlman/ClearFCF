@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const analyze = require("./api/analyze");
 
-const publicDir = path.join(__dirname, "dcf-public");
+const publicDir = path.join(__dirname, "public", "financial-analysis");
 const sharedPublicDir = path.join(__dirname, "public");
 const port = Number(process.env.DCF_PORT || 3001);
 

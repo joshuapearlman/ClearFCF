@@ -24,15 +24,15 @@ function resolvePublicDir() {
 
 function resolveFinancialPublicDir() {
   const candidates = [
-    path.join(__dirname, "dcf-public"),
-    path.join(process.cwd(), "dcf-public"),
-    path.join(__dirname, "v1.1.1", "dcf-public"),
-    path.join(process.cwd(), "v1.1.1", "dcf-public")
+    path.join(__dirname, "public", "financial-analysis"),
+    path.join(process.cwd(), "public", "financial-analysis"),
+    path.join(__dirname, "v1.1.1", "public", "financial-analysis"),
+    path.join(process.cwd(), "v1.1.1", "public", "financial-analysis")
   ];
   for (const dir of candidates) {
     if (fs.existsSync(dir)) return dir;
   }
-  return path.join(__dirname, "dcf-public");
+  return path.join(__dirname, "public", "financial-analysis");
 }
 
 const publicDir = resolvePublicDir();
