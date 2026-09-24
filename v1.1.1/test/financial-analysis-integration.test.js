@@ -34,6 +34,17 @@ test("Financial Deep Analysis is served by the main ClearFCF application", () =>
   assert.match(financialApp, /nwcMethod/);
   assert.match(financialApp, /apply-ratio-method/);
   assert.match(financialApp, /percentagePointChange/);
+  const collapsibleSections = [...financialIndex.matchAll(/data-collapse-id="([^"]+)" data-collapse-targets="([^"]+)"/g)];
+  assert.equal(collapsibleSections.length, 14);
+  for (const [, id, selectors] of collapsibleSections) {
+    assert.ok(id.length > 0);
+    for (const selector of selectors.split(",")) assert.match(financialIndex, new RegExp(`id="${selector.trim().replace(/^#/, "")}"`));
+  }
+  assert.match(financialIndex, /id="collapse-all"/);
+  assert.match(financialIndex, /id="expand-all"/);
+  assert.match(financialApp, /target\.hidden = collapsed/);
+  assert.match(financialApp, /COLLAPSE_STORAGE_KEY/);
+  assert.match(financialApp, /initializeCollapsibleSections\(\)/);
   assert.match(financialIndex, /href="\/"/);
   assert.match(financialApp, /syncVisibleDriverInputs\(model\)/);
   assert.match(financialApp, /save\(\);\s*showMessage\(`Updated the \$\{CASE_LABELS\[state\.activeCase\]\} assumption/);

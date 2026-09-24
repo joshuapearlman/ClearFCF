@@ -6,6 +6,16 @@ const $$ = (selector) => [...document.querySelectorAll(selector)];
 const CASES = ["bear", "base", "bull"];
 const CASE_LABELS = { bear: "Bear", base: "Base", bull: "Bull" };
 const STORAGE_PREFIX = "clearfcf-financial-analysis-v2:";
+const COLLAPSE_STORAGE_KEY = "clearfcf-financial-analysis-collapsed-v1";
+
+function loadCollapsedSections() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(COLLAPSE_STORAGE_KEY));
+    return new Set(Array.isArray(stored) ? stored : []);
+  } catch { return new Set(); }
+}
+
+const collapsedSections = loadCollapsedSections();
 
 const state = {
   report: null,
@@ -60,6 +70,51 @@ function showMessage(text, error = false) {
   node.className = `message${error ? " error" : ""}`;
 }
 function clearMessage() { $("#message").className = "message hidden"; }
+
+function saveCollapsedSections() {
+  try { localStorage.setItem(COLLAPSE_STORAGE_KEY, JSON.stringify([...collapsedSections])); }
+  catch { /* Collapsing still works when local storage is unavailable. */ }
+}
+
+function setSectionCollapsed(header, collapsed, persist = true) {
+  if (!header?.dataset.collapseId || !header.dataset.collapseTargets) return;
+  $$(header.dataset.collapseTargets).forEach((target) => {
+    target.hidden = collapsed;
+    target.setAttribute("aria-hidden", String(collapsed));
+  });
+  header.classList.toggle("collapsed", collapsed);
+  const button = header.querySelector("[data-collapse-section]");
+  if (button) {
+    button.textContent = collapsed ? "Expand" : "Collapse";
+    button.setAttribute("aria-expanded", String(!collapsed));
+    button.setAttribute("aria-label", `${collapsed ? "Expand" : "Collapse"} ${header.querySelector("h2")?.textContent || "section"}`);
+  }
+  if (collapsed) collapsedSections.add(header.dataset.collapseId);
+  else collapsedSections.delete(header.dataset.collapseId);
+  if (persist) saveCollapsedSections();
+}
+
+function initializeCollapsibleSections() {
+  $$(".section-head[data-collapse-id]").forEach((header) => {
+    let actions = header.querySelector(":scope > .section-actions");
+    if (!actions) {
+      actions = document.createElement("div");
+      actions.className = "section-actions";
+      header.append(actions);
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary collapse-toggle";
+    button.dataset.collapseSection = header.dataset.collapseId;
+    actions.append(button);
+    setSectionCollapsed(header, collapsedSections.has(header.dataset.collapseId), false);
+  });
+}
+
+function setAllSectionsCollapsed(collapsed) {
+  $$(".section-head[data-collapse-id]").forEach((header) => setSectionCollapsed(header, collapsed, false));
+  saveCollapsedSections();
+}
 
 function defaultWacc(report) {
   const recent = report.rows.slice(0, state.historicalYears);
@@ -657,6 +712,8 @@ $("#auto-all").addEventListener("click", () => {
   updateAndRender();
   showMessage("Rebuilt Bear, Base, and Bull from their current assumptions.");
 });
+$("#collapse-all").addEventListener("click", () => setAllSectionsCollapsed(true));
+$("#expand-all").addEventListener("click", () => setAllSectionsCollapsed(false));
 $("#driver-card").addEventListener("click", (event) => {
   if (!event.target.closest("#apply-ratio-method")) return;
   const model = state.cases[state.activeCase];
@@ -726,6 +783,14 @@ $("#workspace").addEventListener("change", (event) => {
   updateAndRender();
 });
 
+$("#workspace").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-collapse-section]");
+  if (!button) return;
+  const header = button.closest(".section-head[data-collapse-id]");
+  setSectionCollapsed(header, !header.classList.contains("collapsed"));
+});
+
+initializeCollapsibleSections();
 renderSelectors();
 const requestedTicker = new URLSearchParams(window.location.search).get("ticker");
 if (requestedTicker) loadTicker(requestedTicker);
