@@ -1,6 +1,6 @@
 # Clear FCF Screener
 
-**Current application version: 1.1.1**
+**Current application version: 1.1.2**
 
 A from-scratch, Vercel-ready normalized free-cash-flow idea screener. Multiple market universes (S&P 500, S&P 400 MidCap, Small-Cap, Full SEC Directory, Yahoo Discovery) generate candidates; official SEC Company Facts provide six to ten years of annual financial evidence.
 
@@ -29,7 +29,7 @@ pnpm start
 
 Open a company report, select **Deep Analysis**, then choose **Financial Deep Analysis**. The workspace opens at `/financial-analysis` on the same ClearFCF server and carries the selected ticker automatically. The `pnpm dcf` command remains available as an optional standalone development server on port 3001.
 
-It includes SEC-sourced historical changes and margins, explicit revenue-growth and EBIT-margin forecast methods, walk-forward backtesting, editable Bear/Base/Bull forecasts, an EBIT-based FCFF DCF, calculated or manual WACC, perpetuity-growth and exit-multiple terminal values, sensitivity analysis, earnings-quality and capital-allocation diagnostics, consistency checks, and locally saved forecast snapshots.
+It includes SEC-sourced historical changes and margins; latest-year, 3-year average, 5-year average, median, fade-to-target, and manual forecast methods for D&A, CapEx, and operating-NWC components; explicit revenue-growth and EBIT-margin methods; walk-forward backtesting; editable Bear/Base/Bull forecasts; an EBIT-based FCFF DCF; calculated or manual WACC; perpetuity-growth and exit-multiple terminal values; sensitivity analysis; earnings-quality and capital-allocation diagnostics; consistency checks; and locally saved forecast snapshots.
 
 To create a distributable Apple-silicon Mac build:
 

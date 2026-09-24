@@ -28,6 +28,12 @@ test("Financial Deep Analysis is served by the main ClearFCF application", () =>
   assert.match(financialIndex, /\/financial-analysis\/styles\.css/);
   assert.match(financialIndex, /\/financial-analysis\/engine\.js/);
   assert.match(financialIndex, /\/financial-analysis\/app\.js/);
+  assert.match(financialIndex, /id="driver-history-table"/);
+  assert.match(financialApp, /dnaMarginMethod/);
+  assert.match(financialApp, /capexMarginMethod/);
+  assert.match(financialApp, /nwcMethod/);
+  assert.match(financialApp, /apply-ratio-method/);
+  assert.match(financialApp, /percentagePointChange/);
   assert.match(financialIndex, /href="\/"/);
   assert.match(financialApp, /syncVisibleDriverInputs\(model\)/);
   assert.match(financialApp, /save\(\);\s*showMessage\(`Updated the \$\{CASE_LABELS\[state\.activeCase\]\} assumption/);

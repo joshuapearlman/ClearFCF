@@ -37,6 +37,40 @@
     }).filter(finite);
   }
 
+  function rowRatio(row, key) {
+    const revenue = number(row?.revenue);
+    if (!revenue) return null;
+    if (key === "netWorkingCapital") {
+      const value = finite(row.netWorkingCapital) ? number(row.netWorkingCapital)
+        : ["accountsReceivable", "inventory", "prepaidExpenses", "accountsPayable", "accruedExpenses"].some((component) => finite(row[component]))
+          ? number(row.accountsReceivable) + number(row.inventory) + number(row.prepaidExpenses)
+            - number(row.accountsPayable) - number(row.accruedExpenses)
+          : null;
+      return finite(value) ? number(value) / revenue : null;
+    }
+    return finite(row?.[key]) ? number(row[key]) / revenue : null;
+  }
+
+  function historicalRatio(rows, key, method = "average5", fallback = 0) {
+    const values = (rows || []).map((row) => rowRatio(row, key)).filter(finite).slice(0, 5);
+    if (!values.length) return fallback;
+    if (method === "latest") return values[0];
+    if (method === "average3") return average(values.slice(0, 3)) ?? fallback;
+    if (method === "median") return median(values) ?? fallback;
+    return average(values) ?? fallback;
+  }
+
+  function forecastRatio(rows, key, method, target, progress, fallback) {
+    const selectedMethod = method || (finite(target) ? "manual" : "average5");
+    if (selectedMethod === "manual") return finite(target) ? number(target) : fallback;
+    if (selectedMethod === "fade") {
+      const startingRatio = historicalRatio(rows, key, "latest", fallback);
+      const targetRatio = finite(target) ? number(target) : historicalRatio(rows, key, "average5", fallback);
+      return startingRatio + (targetRatio - startingRatio) * progress;
+    }
+    return historicalRatio(rows, key, selectedMethod, fallback);
+  }
+
   function historicalAssumptions(rows, maxYears = 5) {
     const recent = (rows || []).filter((row) => finite(row.revenue) && Number(row.revenue) > 0).slice(0, maxYears);
     const latest = recent[0] || {};
@@ -94,14 +128,6 @@
       : marginMethod === "average3" ? (average(margins.slice(0, 3)) ?? assumptions.ebitMargin)
         : marginMethod === "median" ? (median(margins.slice(0, 5)) ?? assumptions.ebitMargin)
           : (average(margins.slice(0, 5)) ?? assumptions.ebitMargin);
-    const driverOrHistory = (key) => finite(drivers[key]) ? number(drivers[key]) : assumptions[key];
-    const dnaMargin = driverOrHistory("dnaMargin");
-    const capexMargin = driverOrHistory("capexMargin");
-    const accountsReceivableMargin = driverOrHistory("accountsReceivableMargin");
-    const inventoryMargin = driverOrHistory("inventoryMargin");
-    const prepaidExpensesMargin = driverOrHistory("prepaidExpensesMargin");
-    const accountsPayableMargin = driverOrHistory("accountsPayableMargin");
-    const accruedExpensesMargin = driverOrHistory("accruedExpensesMargin");
     let revenue = assumptions.latestRevenue;
     let priorNwc = assumptions.latestNwc;
     const forecastYears = clamp(number(years, 5), 1, 10);
@@ -113,6 +139,24 @@
       revenue *= 1 + growth;
       const targetMargin = finite(drivers.terminalEbitMargin) ? number(drivers.terminalEbitMargin) : startingMargin;
       const selectedMargin = marginMethod === "fade" ? startingMargin + (targetMargin - startingMargin) * progress : startingMargin;
+      const dnaMethod = drivers.dnaMarginMethod || (finite(drivers.dnaMargin) ? "manual" : "average5");
+      const capexMethod = drivers.capexMarginMethod || (finite(drivers.capexMargin) ? "manual" : "average5");
+      const nwcMethod = drivers.nwcMethod || null;
+      const dnaMargin = forecastRatio(rows, "dna", dnaMethod, drivers.dnaMargin, progress, assumptions.dnaMargin);
+      const capexMargin = forecastRatio(rows, "capex", capexMethod, drivers.capexMargin, progress, assumptions.capexMargin);
+      const componentRatio = (key, assumptionKey) => forecastRatio(
+        rows,
+        key,
+        nwcMethod || (finite(drivers[assumptionKey]) ? "manual" : "average5"),
+        drivers[assumptionKey],
+        progress,
+        assumptions[assumptionKey]
+      );
+      const accountsReceivableMargin = componentRatio("accountsReceivable", "accountsReceivableMargin");
+      const inventoryMargin = componentRatio("inventory", "inventoryMargin");
+      const prepaidExpensesMargin = componentRatio("prepaidExpenses", "prepaidExpensesMargin");
+      const accountsPayableMargin = componentRatio("accountsPayable", "accountsPayableMargin");
+      const accruedExpensesMargin = componentRatio("accruedExpenses", "accruedExpensesMargin");
       const accountsReceivable = revenue * accountsReceivableMargin;
       const inventory = revenue * inventoryMargin;
       const prepaidExpenses = revenue * prepaidExpensesMargin;
@@ -145,14 +189,14 @@
           revenue: "Selected revenue-growth rule",
           revenueGrowth: "Selected revenue-growth rule",
           ebit: "Revenue × selected EBIT margin",
-          dna: "Revenue × D&A / revenue",
-          capex: "Revenue × CapEx / revenue",
-          accountsReceivable: "Revenue × A/R / revenue",
-          inventory: "Revenue × inventory / revenue",
-          prepaidExpenses: "Revenue × prepaids / revenue",
+          dna: `Revenue × D&A / revenue (${dnaMethod})`,
+          capex: `Revenue × CapEx / revenue (${capexMethod})`,
+          accountsReceivable: `Revenue × A/R / revenue (${nwcMethod || "manual"})`,
+          inventory: `Revenue × inventory / revenue (${nwcMethod || "manual"})`,
+          prepaidExpenses: `Revenue × prepaids / revenue (${nwcMethod || "manual"})`,
           operatingCurrentAssets: "A/R + inventory + prepaids",
-          accountsPayable: "Revenue × A/P / revenue",
-          accruedExpenses: "Revenue × accrued expenses / revenue",
+          accountsPayable: `Revenue × A/P / revenue (${nwcMethod || "manual"})`,
+          accruedExpenses: `Revenue × accrued expenses / revenue (${nwcMethod || "manual"})`,
           operatingCurrentLiabilities: "A/P + accrued expenses",
           netWorkingCapital: "Operating current assets − liabilities",
           changeInNwc: "Current operating NWC − prior operating NWC"
@@ -305,6 +349,7 @@
     median,
     cagr,
     historicalGrowthRates,
+    historicalRatio,
     historicalAssumptions,
     autoForecast,
     autoForecastWithDrivers,

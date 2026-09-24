@@ -36,6 +36,11 @@ function compact(value, currency = true) {
   return `${sign}${prefix}${absolute.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 }
 function percent(value, digits = 1) { return finite(value) ? `${(Number(value) * 100).toFixed(digits)}%` : "—"; }
+function percentagePointChange(current, prior) {
+  if (!finite(current) || !finite(prior)) return "—";
+  const points = (number(current) - number(prior)) * 100;
+  return `${points > 0 ? "+" : ""}${points.toFixed(1)} pp`;
+}
 function perShare(value) { return finite(value) ? `$${Number(value).toFixed(2)}` : "—"; }
 function millions(value) { return finite(value) ? Number(value) / 1e6 : ""; }
 function fromMillions(value) { return finite(value) ? Number(value) * 1e6 : 0; }
@@ -94,8 +99,11 @@ function defaultDrivers() {
     terminalRevenueGrowth: 0.03,
     ebitMarginMethod: "average5",
     terminalEbitMargin: null,
+    dnaMarginMethod: "average5",
     dnaMargin: null,
+    capexMarginMethod: "average5",
     capexMargin: null,
+    nwcMethod: "average5",
     accountsReceivableMargin: null,
     inventoryMargin: null,
     prepaidExpensesMargin: null,
@@ -292,6 +300,36 @@ function renderTrends() {
   $("#trend-table").innerHTML = `<table class="wide-table"><thead><tr><th>Year</th><th>Revenue</th><th>Δ revenue</th><th>Revenue growth</th><th>EBIT</th><th>Δ EBIT</th><th>EBIT growth</th><th>EBIT margin</th><th>Operating cash flow</th><th>FCF</th><th>FCF margin</th><th>Share change</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 
+function operatingNwc(row) {
+  if (finite(row?.netWorkingCapital)) return number(row.netWorkingCapital);
+  const components = ["accountsReceivable", "inventory", "prepaidExpenses", "accountsPayable", "accruedExpenses"];
+  if (!components.some((key) => finite(row?.[key]))) return null;
+  return number(row.accountsReceivable) + number(row.inventory) + number(row.prepaidExpenses)
+    - number(row.accountsPayable) - number(row.accruedExpenses);
+}
+
+function renderDriverHistory() {
+  const rows = state.report.rows.slice(0, state.historicalYears).reverse();
+  const reinvestmentRows = rows.map((row, index) => {
+    const prior = rows[index - 1];
+    const dnaRatio = ratio(row.dna, row.revenue);
+    const priorDnaRatio = ratio(prior?.dna, prior?.revenue);
+    const capexRatio = ratio(row.capex, row.revenue);
+    const priorCapexRatio = ratio(prior?.capex, prior?.revenue);
+    const nwc = operatingNwc(row);
+    const priorNwc = operatingNwc(prior);
+    const nwcRatio = ratio(nwc, row.revenue);
+    const priorNwcRatio = ratio(priorNwc, prior?.revenue);
+    return `<tr><td class="row-label">${row.year}</td><td>${compact(row.dna)}</td><td>${percent(dnaRatio)}</td><td>${percentagePointChange(dnaRatio, priorDnaRatio)}</td><td>${compact(row.capex)}</td><td>${percent(capexRatio)}</td><td>${percentagePointChange(capexRatio, priorCapexRatio)}</td><td>${compact(nwc)}</td><td>${percent(nwcRatio)}</td><td>${percentagePointChange(nwcRatio, priorNwcRatio)}</td><td>${compact(finite(row.changeInNwc) ? row.changeInNwc : finite(priorNwc) && finite(nwc) ? nwc - priorNwc : null)}</td></tr>`;
+  }).join("");
+  const componentRows = rows.map((row) => {
+    const oca = number(row.accountsReceivable) + number(row.inventory) + number(row.prepaidExpenses);
+    const ocl = number(row.accountsPayable) + number(row.accruedExpenses);
+    return `<tr><td class="row-label">${row.year}</td><td>${percent(ratio(row.accountsReceivable, row.revenue))}</td><td>${percent(ratio(row.inventory, row.revenue))}</td><td>${percent(ratio(row.prepaidExpenses, row.revenue))}</td><td>${percent(ratio(row.accountsPayable, row.revenue))}</td><td>${percent(ratio(row.accruedExpenses, row.revenue))}</td><td>${percent(ratio(oca, row.revenue))}</td><td>${percent(ratio(ocl, row.revenue))}</td></tr>`;
+  }).join("");
+  $("#driver-history-table").innerHTML = `<div class="history-table-group"><h3>Reinvestment and net working capital</h3><table class="wide-table"><thead><tr><th>Year</th><th>D&A</th><th>D&A / revenue</th><th>Δ D&A / revenue</th><th>CapEx</th><th>CapEx / revenue</th><th>Δ CapEx / revenue</th><th>Operating NWC</th><th>NWC / revenue</th><th>Δ NWC / revenue</th><th>Change in NWC</th></tr></thead><tbody>${reinvestmentRows}</tbody></table></div><div class="history-table-group"><h3>Operating NWC components as a percentage of revenue</h3><table><thead><tr><th>Year</th><th>A/R / revenue</th><th>Inventory / revenue</th><th>Prepaids / revenue</th><th>A/P / revenue</th><th>Accrued expenses / revenue</th><th>Operating CA / revenue</th><th>Operating CL / revenue</th></tr></thead><tbody>${componentRows}</tbody></table><p class="table-note">Operating NWC = accounts receivable + inventory + prepaid expenses − accounts payable − accrued expenses. Percentage-point changes make shifts in capital intensity comparable across years.</p></div>`;
+}
+
 function methodLabel(method, type) {
   const labels = type === "revenue" ? {
     cagr5: "5-year CAGR", cagr3: "3-year CAGR", latest: "Latest YoY growth", average: "Average YoY growth", median: "Median YoY growth", fade: "Fade to a long-run rate"
@@ -299,6 +337,12 @@ function methodLabel(method, type) {
     average5: "5-year average margin", average3: "3-year average margin", latest: "Latest margin", median: "Median margin", fade: "Fade to a target margin"
   };
   return labels[method] || method;
+}
+
+function ratioMethodLabel(method) {
+  return {
+    average5: "5-year average", average3: "3-year average", latest: "Latest year", median: "5-year median", fade: "Fade to target", manual: "Manual"
+  }[method] || method;
 }
 
 function renderDrivers() {
@@ -314,18 +358,37 @@ function renderDrivers() {
   }
   const revenueOptions = [["cagr5", "5-year CAGR"], ["cagr3", "3-year CAGR"], ["latest", "Latest YoY growth"], ["average", "Average YoY growth"], ["median", "Median YoY growth"], ["fade", "Fade to long-run rate"]];
   const marginOptions = [["average5", "5-year average"], ["average3", "3-year average"], ["latest", "Latest margin"], ["median", "Median margin"], ["fade", "Fade to target margin"]];
+  const ratioOptions = [["average5", "5-year average"], ["average3", "3-year average"], ["latest", "Latest year"], ["median", "5-year median"], ["fade", "Fade to target"], ["manual", "Manual ratio"]];
+  const sharedRatioMethod = drivers.dnaMarginMethod === drivers.capexMarginMethod && drivers.capexMarginMethod === drivers.nwcMethod
+    && ["average5", "average3", "latest", "median"].includes(drivers.nwcMethod) ? drivers.nwcMethod : "average5";
+  const preview = dcf.autoForecastWithDrivers(rows, state.forecastYears, state.activeCase, drivers);
+  const firstForecast = preview[0] || {};
+  const finalForecast = preview.at(-1) || {};
+  const aggregateNwcRatio = (method) => dcf.historicalRatio(rows, "accountsReceivable", method)
+    + dcf.historicalRatio(rows, "inventory", method)
+    + dcf.historicalRatio(rows, "prepaidExpenses", method)
+    - dcf.historicalRatio(rows, "accountsPayable", method)
+    - dcf.historicalRatio(rows, "accruedExpenses", method);
+  const comparisonRows = [
+    ["D&A / revenue", "dna", drivers.dnaMarginMethod, ratio(firstForecast.dna, firstForecast.revenue), ratio(finalForecast.dna, finalForecast.revenue)],
+    ["CapEx / revenue", "capex", drivers.capexMarginMethod, ratio(firstForecast.capex, firstForecast.revenue), ratio(finalForecast.capex, finalForecast.revenue)],
+    ["Operating NWC / revenue", "netWorkingCapital", drivers.nwcMethod, ratio(firstForecast.netWorkingCapital, firstForecast.revenue), ratio(finalForecast.netWorkingCapital, finalForecast.revenue)]
+  ];
   $("#driver-card").innerHTML = `<div class="driver-grid">
     <div class="driver-block"><p class="eyebrow">Top-line method</p><h3>Revenue growth</h3>${field("Forecast method", "revenueMethod", drivers.revenueMethod, { group: "driver", select: revenueOptions })}${field("Long-run revenue growth", "terminalRevenueGrowth", drivers.terminalRevenueGrowth, { group: "driver", percent: true, hint: "Used when the fade method is selected." })}<p class="method-note">Active rule: <strong>${escapeHtml(methodLabel(drivers.revenueMethod, "revenue"))}</strong>. Rebuilding applies this rule to every forecast year.</p></div>
     <div class="driver-block"><p class="eyebrow">Profitability method</p><h3>EBIT margin</h3>${field("Forecast method", "ebitMarginMethod", drivers.ebitMarginMethod, { group: "driver", select: marginOptions })}${field("Target EBIT margin", "terminalEbitMargin", drivers.terminalEbitMargin, { group: "driver", percent: true, hint: "Used when the fade method is selected." })}<p class="method-note">Active rule: <strong>${escapeHtml(methodLabel(drivers.ebitMarginMethod, "margin"))}</strong>. Bear and bull cases retain their explicit margin adjustments.</p></div>
-    <div class="driver-block full"><p class="eyebrow">Reinvestment and working-capital drivers</p><h3>Forecast D&A, CapEx and operating NWC</h3>
-      ${field("D&A / revenue", "dnaMargin", drivers.dnaMargin, { group: "driver", percent: true, hint: "Historical average from the selected years." })}
-      ${field("CapEx / revenue", "capexMargin", drivers.capexMargin, { group: "driver", percent: true, hint: "Historical average from the selected years." })}
-      ${field("Accounts receivable / revenue", "accountsReceivableMargin", drivers.accountsReceivableMargin, { group: "driver", percent: true })}
-      ${field("Inventory / revenue", "inventoryMargin", drivers.inventoryMargin, { group: "driver", percent: true })}
-      ${field("Prepaid expenses / revenue", "prepaidExpensesMargin", drivers.prepaidExpensesMargin, { group: "driver", percent: true })}
-      ${field("Accounts payable / revenue", "accountsPayableMargin", drivers.accountsPayableMargin, { group: "driver", percent: true })}
-      ${field("Accrued expenses / revenue", "accruedExpensesMargin", drivers.accruedExpensesMargin, { group: "driver", percent: true })}
+    <div class="driver-block full reinvestment-driver-block"><p class="eyebrow">Reinvestment and working-capital drivers</p><h3>Forecast D&A, CapEx and operating NWC</h3>
+      <div class="driver-quick-apply"><label class="field"><span>Quick method for all three</span><select id="ratio-method-preset">${ratioOptions.slice(0, 4).map(([id, name]) => `<option value="${id}" ${id === sharedRatioMethod ? "selected" : ""}>${name}</option>`).join("")}</select></label><button id="apply-ratio-method" type="button" class="secondary">Apply & rebuild</button></div>
+      <div class="ratio-driver-group"><h4>D&A</h4>${field("Forecast method", "dnaMarginMethod", drivers.dnaMarginMethod, { group: "driver", select: ratioOptions })}${field("Target / manual D&A / revenue", "dnaMargin", drivers.dnaMargin, { group: "driver", percent: true, hint: "Used only for Fade to target or Manual ratio." })}</div>
+      <div class="ratio-driver-group"><h4>Capital expenditures</h4>${field("Forecast method", "capexMarginMethod", drivers.capexMarginMethod, { group: "driver", select: ratioOptions })}${field("Target / manual CapEx / revenue", "capexMargin", drivers.capexMargin, { group: "driver", percent: true, hint: "Used only for Fade to target or Manual ratio." })}</div>
+      <div class="ratio-driver-group nwc-driver-group"><h4>Operating net working capital components</h4>${field("Forecast method", "nwcMethod", drivers.nwcMethod, { group: "driver", select: ratioOptions })}
+      ${field("Target / manual A/R / revenue", "accountsReceivableMargin", drivers.accountsReceivableMargin, { group: "driver", percent: true })}
+      ${field("Target / manual inventory / revenue", "inventoryMargin", drivers.inventoryMargin, { group: "driver", percent: true })}
+      ${field("Target / manual prepaids / revenue", "prepaidExpensesMargin", drivers.prepaidExpensesMargin, { group: "driver", percent: true })}
+      ${field("Target / manual A/P / revenue", "accountsPayableMargin", drivers.accountsPayableMargin, { group: "driver", percent: true })}
+      ${field("Target / manual accrued expenses / revenue", "accruedExpensesMargin", drivers.accruedExpensesMargin, { group: "driver", percent: true })}</div>
       <p class="method-note"><strong>Operating NWC = A/R + inventory + prepaids − A/P − accrued expenses.</strong> Change in NWC is the current period’s operating NWC minus the prior period’s operating NWC and is subtracted in FCFF. Edit these ratios, then click Rebuild this case.</p>
+      <div class="ratio-comparison"><h4>Historical method comparison and forecast result</h4><table><thead><tr><th>Driver</th><th>Latest</th><th>3Y average</th><th>5Y average</th><th>5Y median</th><th>Active method</th><th>Forecast year 1</th><th>Final forecast year</th></tr></thead><tbody>${comparisonRows.map(([label, key, method, first, final]) => `<tr><td class="row-label">${label}</td><td>${percent(key === "netWorkingCapital" ? aggregateNwcRatio("latest") : dcf.historicalRatio(rows, key, "latest"))}</td><td>${percent(key === "netWorkingCapital" ? aggregateNwcRatio("average3") : dcf.historicalRatio(rows, key, "average3"))}</td><td>${percent(key === "netWorkingCapital" ? aggregateNwcRatio("average5") : dcf.historicalRatio(rows, key, "average5"))}</td><td>${percent(key === "netWorkingCapital" ? aggregateNwcRatio("median") : dcf.historicalRatio(rows, key, "median"))}</td><td><span class="method-badge">${escapeHtml(ratioMethodLabel(method))}</span></td><td>${percent(first)}</td><td>${percent(final)}</td></tr>`).join("")}</tbody></table></div>
     </div>
     <div class="anchor-strip"><div><span>Latest growth</span><strong>${percent(growthRates[0])}</strong></div><div><span>3Y revenue CAGR</span><strong>${percent(dcf.cagr(rows, 3))}</strong></div><div><span>5Y revenue CAGR</span><strong>${percent(dcf.cagr(rows, 5))}</strong></div><div><span>Median YoY growth</span><strong>${percent(dcf.median(growthRates))}</strong></div><div><span>Latest EBIT margin</span><strong>${percent(margins[0])}</strong></div><div><span>5Y average margin</span><strong>${percent(average(margins))}</strong></div></div>
   </div>`;
@@ -539,6 +602,7 @@ function renderAll() {
   $("#company-chip").innerHTML = `<strong>${escapeHtml(state.report.ticker)} · ${escapeHtml(state.report.companyName)}</strong><small>${escapeHtml(state.report.company?.sicDescription || "Industry unavailable")} · ${escapeHtml(state.report.financialCurrency || "USD")} statements</small>`;
   $$(".case-tabs button").forEach((button) => button.classList.toggle("active", button.dataset.case === state.activeCase));
   renderTrends();
+  renderDriverHistory();
   renderHistorical();
   renderDrivers();
   renderForecast();
@@ -592,6 +656,18 @@ $("#auto-all").addEventListener("click", () => {
   for (const name of CASES) state.cases[name].forecast = dcf.autoForecastWithDrivers(state.report.rows.slice(0, state.historicalYears), state.forecastYears, name, state.cases[name].drivers);
   updateAndRender();
   showMessage("Rebuilt Bear, Base, and Bull from their current assumptions.");
+});
+$("#driver-card").addEventListener("click", (event) => {
+  if (!event.target.closest("#apply-ratio-method")) return;
+  const model = state.cases[state.activeCase];
+  syncVisibleDriverInputs(model);
+  const method = $("#ratio-method-preset")?.value || "average5";
+  model.drivers.dnaMarginMethod = method;
+  model.drivers.capexMarginMethod = method;
+  model.drivers.nwcMethod = method;
+  model.forecast = dcf.autoForecastWithDrivers(state.report.rows.slice(0, state.historicalYears), state.forecastYears, state.activeCase, model.drivers);
+  updateAndRender();
+  showMessage(`Applied the ${ratioMethodLabel(method)} to D&A, CapEx, and all operating-NWC components, then rebuilt the ${CASE_LABELS[state.activeCase]} case.`);
 });
 $("#save-snapshot").addEventListener("click", saveSnapshot);
 $(".case-tabs").addEventListener("click", (event) => {
