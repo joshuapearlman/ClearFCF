@@ -644,7 +644,6 @@ $("#workspace").addEventListener("change", (event) => {
       : target.dataset.inputType === "percent" ? number(target.value) / 100
         : number(target.value);
     save();
-    renderAll();
     showMessage(`Updated the ${CASE_LABELS[state.activeCase]} assumption. Click “Rebuild this case” to apply it to the forecast.`);
     return;
   } else return;

@@ -16,7 +16,7 @@ test("browser screening asset loads before app.js and exposes its API", () => {
   assert.match(index, /id="default-speed-button"/);
   assert.match(index, /id="stop-button"/);
   assert.match(index, />Watchlist</);
-  assert.match(index, /\$250M/);
+  assert.match(index, /\$0 \(All\)/);
   assert.doesNotMatch(index, /id="max-examine"/);
   assert.doesNotMatch(index, /id="skip-seen"/);
   const app = fs.readFileSync(path.join(publicDir, "app.js"), "utf8");

@@ -5,8 +5,13 @@
     "api/screen.js": { "maxDuration": 60 },
     "api/universe.js": { "maxDuration": 30 }
   },
-    "rewrites": [
+  "rewrites": [
     { "source": "/", "destination": "/public/index.html" },
+    { "source": "/financial-analysis", "destination": "/dcf-public/index.html" },
+    { "source": "/financial-analysis/", "destination": "/dcf-public/index.html" },
+    { "source": "/financial-analysis/app.js", "destination": "/dcf-public/app.js" },
+    { "source": "/financial-analysis/engine.js", "destination": "/dcf-public/engine.js" },
+    { "source": "/financial-analysis/styles.css", "destination": "/dcf-public/styles.css" },
     { "source": "/app.js", "destination": "/public/app.js" },
     { "source": "/screening.js", "destination": "/public/screening.js" },
     { "source": "/styles.css", "destination": "/public/styles.css" },
