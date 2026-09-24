@@ -45,6 +45,12 @@
     const revenueGrowth = recent.length > 1 && number(oldest.revenue) > 0
       ? (number(latest.revenue) / number(oldest.revenue)) ** (1 / elapsed) - 1
       : 0.05;
+    const componentMargin = (key) => average(recent.map((row) => finite(row[key]) ? number(row[key]) / number(row.revenue) : null)) ?? 0;
+    const latestNwc = finite(latest.netWorkingCapital) ? number(latest.netWorkingCapital)
+      : ["accountsReceivable", "inventory", "prepaidExpenses", "accountsPayable", "accruedExpenses"].some((key) => finite(latest[key]))
+        ? number(latest.accountsReceivable) + number(latest.inventory) + number(latest.prepaidExpenses)
+          - number(latest.accountsPayable) - number(latest.accruedExpenses)
+        : 0;
     return {
       latestRevenue: number(latest.revenue),
       revenueGrowth: clamp(revenueGrowth, -0.20, 0.30),
@@ -52,7 +58,12 @@
       taxRate: clamp(average(recent.map((row) => row.effectiveTaxRate)) ?? 0.21, 0, 0.45),
       dnaMargin: average(recent.map((row) => finite(row.dna) ? number(row.dna) / number(row.revenue) : null)) ?? 0.03,
       capexMargin: average(recent.map((row) => finite(row.capex) ? number(row.capex) / number(row.revenue) : null)) ?? 0.04,
-      nwcInvestmentMargin: average(recent.map((row) => finite(row.changeInNwc) ? number(row.changeInNwc) / number(row.revenue) : null)) ?? 0.01
+      accountsReceivableMargin: componentMargin("accountsReceivable"),
+      inventoryMargin: componentMargin("inventory"),
+      prepaidExpensesMargin: componentMargin("prepaidExpenses"),
+      accountsPayableMargin: componentMargin("accountsPayable"),
+      accruedExpensesMargin: componentMargin("accruedExpenses"),
+      latestNwc
     };
   }
 
@@ -83,7 +94,16 @@
       : marginMethod === "average3" ? (average(margins.slice(0, 3)) ?? assumptions.ebitMargin)
         : marginMethod === "median" ? (median(margins.slice(0, 5)) ?? assumptions.ebitMargin)
           : (average(margins.slice(0, 5)) ?? assumptions.ebitMargin);
+    const driverOrHistory = (key) => finite(drivers[key]) ? number(drivers[key]) : assumptions[key];
+    const dnaMargin = driverOrHistory("dnaMargin");
+    const capexMargin = driverOrHistory("capexMargin");
+    const accountsReceivableMargin = driverOrHistory("accountsReceivableMargin");
+    const inventoryMargin = driverOrHistory("inventoryMargin");
+    const prepaidExpensesMargin = driverOrHistory("prepaidExpensesMargin");
+    const accountsPayableMargin = driverOrHistory("accountsPayableMargin");
+    const accruedExpensesMargin = driverOrHistory("accruedExpensesMargin");
     let revenue = assumptions.latestRevenue;
+    let priorNwc = assumptions.latestNwc;
     const forecastYears = clamp(number(years, 5), 1, 10);
     return Array.from({ length: clamp(number(years, 5), 1, 10) }, (_, index) => {
       const progress = forecastYears === 1 ? 1 : index / (forecastYears - 1);
@@ -93,16 +113,50 @@
       revenue *= 1 + growth;
       const targetMargin = finite(drivers.terminalEbitMargin) ? number(drivers.terminalEbitMargin) : startingMargin;
       const selectedMargin = marginMethod === "fade" ? startingMargin + (targetMargin - startingMargin) * progress : startingMargin;
+      const accountsReceivable = revenue * accountsReceivableMargin;
+      const inventory = revenue * inventoryMargin;
+      const prepaidExpenses = revenue * prepaidExpensesMargin;
+      const accountsPayable = revenue * accountsPayableMargin;
+      const accruedExpenses = revenue * accruedExpensesMargin;
+      const operatingCurrentAssets = accountsReceivable + inventory + prepaidExpenses;
+      const operatingCurrentLiabilities = accountsPayable + accruedExpenses;
+      const netWorkingCapital = operatingCurrentAssets - operatingCurrentLiabilities;
+      const changeInNwc = netWorkingCapital - priorNwc;
+      priorNwc = netWorkingCapital;
       return {
         year: latestYear + index + 1,
         revenue,
         revenueGrowth: growth,
         ebit: revenue * clamp(selectedMargin + adjustment.ebit, -0.50, 0.80),
         taxRate: assumptions.taxRate,
-        dna: revenue * Math.max(0, assumptions.dnaMargin),
-        capex: revenue * Math.max(0, assumptions.capexMargin + adjustment.capex),
-        changeInNwc: revenue * assumptions.nwcInvestmentMargin,
-        source: "Automatically derived"
+        dna: revenue * Math.max(0, dnaMargin),
+        capex: revenue * Math.max(0, capexMargin + adjustment.capex),
+        accountsReceivable,
+        inventory,
+        prepaidExpenses,
+        operatingCurrentAssets,
+        accountsPayable,
+        accruedExpenses,
+        operatingCurrentLiabilities,
+        netWorkingCapital,
+        changeInNwc,
+        source: "Automatically derived",
+        sources: {
+          revenue: "Selected revenue-growth rule",
+          revenueGrowth: "Selected revenue-growth rule",
+          ebit: "Revenue × selected EBIT margin",
+          dna: "Revenue × D&A / revenue",
+          capex: "Revenue × CapEx / revenue",
+          accountsReceivable: "Revenue × A/R / revenue",
+          inventory: "Revenue × inventory / revenue",
+          prepaidExpenses: "Revenue × prepaids / revenue",
+          operatingCurrentAssets: "A/R + inventory + prepaids",
+          accountsPayable: "Revenue × A/P / revenue",
+          accruedExpenses: "Revenue × accrued expenses / revenue",
+          operatingCurrentLiabilities: "A/P + accrued expenses",
+          netWorkingCapital: "Operating current assets − liabilities",
+          changeInNwc: "Current operating NWC − prior operating NWC"
+        }
       };
     });
   }
@@ -175,7 +229,7 @@
     if (terminal.method === "exit") {
       const basis = terminal.exitMetric === "ebit" ? finalYear.ebit
         : terminal.exitMetric === "fcff" ? finalYear.fcff
-          : finalYear.ebitda;
+          : finalYear.ebit;
       return { value: number(basis) * number(terminal.exitMultiple), basis, method: "exit" };
     }
     const growth = number(terminal.growthRate);

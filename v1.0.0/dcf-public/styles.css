@@ -84,6 +84,7 @@ td.missing { color: #a4aaa7; }
 .form-grid .wide { grid-column: 1 / -1; }
 .driver-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); }
 .driver-block { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; align-content: start; background: var(--card); padding: 20px; }
+.driver-block.full { grid-column: 1 / -1; grid-template-columns: repeat(4, minmax(150px, 1fr)); }
 .driver-block > .eyebrow, .driver-block > h3, .driver-block > .method-note { grid-column: 1 / -1; }
 .driver-block h3 { margin: -3px 0 5px; font-family: Georgia, serif; font-size: 23px; }
 .method-note { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
@@ -100,6 +101,11 @@ td.missing { color: #a4aaa7; }
 .calculation-strip div { background: #f3f6f3; padding: 11px; }
 .calculation-strip span { display: block; color: var(--muted); font-size: 10px; }
 .calculation-strip strong { display: block; margin-top: 3px; font-size: 17px; }
+.formula-box { grid-column: 1 / -1; display: grid; gap: 5px; padding: 13px 15px; border: 1px solid #bfd3c8; border-radius: 9px; background: var(--green-soft); text-transform: none; letter-spacing: 0; }
+.formula-box strong { color: var(--green); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.formula-box span { color: var(--ink); font-size: 13px; font-weight: 700; }
+.formula-box small { color: var(--muted); font-size: 11px; font-weight: 500; }
+.bridge-formula { margin-top: 2px; }
 .bridge-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 13px; padding: 18px; }
 .output-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-top: 12px; }
 .output-card { padding: 15px; border: 1px solid var(--line); background: var(--card); border-radius: 12px; }
@@ -132,6 +138,7 @@ td.missing { color: #a4aaa7; }
   .two-column { grid-template-columns: 1fr; }
   .bridge-grid, .output-grid { grid-template-columns: repeat(3, 1fr); }
   .anchor-strip { grid-template-columns: repeat(3, 1fr); }
+  .driver-block.full { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
   .snapshot { grid-template-columns: 1fr; }
   .controls { flex-wrap: wrap; position: static; }
   .save-state { margin-left: 0; }
@@ -145,5 +152,6 @@ td.missing { color: #a4aaa7; }
   .section-head p:last-child { text-align: left; }
   .form-grid, .bridge-grid, .output-grid, .audit-grid, .driver-grid { grid-template-columns: 1fr 1fr; }
   .driver-grid { grid-template-columns: 1fr; }
+  .driver-block.full { grid-template-columns: 1fr; }
   .anchor-strip, .kpi-strip, .snapshot dl { grid-template-columns: 1fr 1fr; }
 }

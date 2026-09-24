@@ -47,7 +47,7 @@ async function fetchYahooQuote(ticker) {
       const auth = await getYahooAuth(attempt > 0);
       const authHeaders = auth?.cookie ? { ...HEADERS, cookie: auth.cookie } : HEADERS;
       const crumbStr = auth?.crumb ? `&crumb=${encodeURIComponent(auth.crumb)}` : "";
-      const summaryUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=price,defaultKeyStatistics,financialData,assetProfile,summaryDetail,insiderTransactions,netSharePurchaseActivity${crumbStr}`;
+      const summaryUrl = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=price,defaultKeyStatistics,financialData,assetProfile,summaryDetail,balanceSheetHistoryQuarterly,insiderTransactions,netSharePurchaseActivity${crumbStr}`;
       const summaryData = await fetchJson(summaryUrl, { headers: authHeaders }, 8000);
       const result = summaryData?.quoteSummary?.result?.[0];
       const pMod = result?.price;
@@ -55,6 +55,7 @@ async function fetchYahooQuote(ticker) {
       const fMod = result?.financialData;
       const profile = result?.assetProfile;
       const detail = result?.summaryDetail;
+      const balanceSheet = result?.balanceSheetHistoryQuarterly?.balanceSheetStatements?.[0] || {};
 
       const priceVal = pMod?.regularMarketPrice?.raw ?? pMod?.regularMarketPrice;
       const mcVal = pMod?.marketCap?.raw ?? pMod?.marketCap;
@@ -67,6 +68,12 @@ async function fetchYahooQuote(ticker) {
       const evVal = sMod?.enterpriseValue?.raw ?? (finite(sMod?.enterpriseValue) ? sMod?.enterpriseValue : null);
 
       const raw = (field) => field?.raw ?? (finite(field) ? field : null);
+      const betaVal = raw(sMod?.beta);
+      const preferredStockVal = raw(balanceSheet.preferredStock) ?? raw(balanceSheet.preferredStockEquity);
+      const minorityInterestVal = raw(balanceSheet.minorityInterest);
+      const otherNonOperatingAssetsVal = raw(balanceSheet.longTermEquityInvestment)
+        ?? raw(balanceSheet.investmentinFinancialAssets)
+        ?? raw(balanceSheet.otherInvestments);
       const currentYield = raw(detail?.dividendYield) ?? raw(detail?.trailingAnnualDividendYield);
       const dividendRate = raw(detail?.dividendRate) ?? raw(detail?.trailingAnnualDividendRate);
       const fiveYearYieldPercent = raw(sMod?.fiveYearAvgDividendYield);
@@ -109,6 +116,10 @@ async function fetchYahooQuote(ticker) {
           quickRatio: finite(quickRatioVal) ? quickRatioVal : null,
           bookValue: finite(bookValueVal) ? bookValueVal : null,
           enterpriseValue: finite(evVal) ? evVal : null,
+          beta: finite(betaVal) ? betaVal : null,
+          preferredStock: finite(preferredStockVal) ? preferredStockVal : null,
+          minorityInterest: finite(minorityInterestVal) ? minorityInterestVal : null,
+          otherNonOperatingAssets: finite(otherNonOperatingAssetsVal) ? otherNonOperatingAssetsVal : null,
           currency: pMod?.currency || null,
           exchange: pMod?.exchangeName || null,
           instrumentType: pMod?.quoteType || null,
@@ -168,6 +179,10 @@ async function fetchYahooQuote(ticker) {
           quickRatio: null,
           bookValue: null,
           enterpriseValue: null,
+          beta: finite(q.beta) ? q.beta : null,
+          preferredStock: null,
+          minorityInterest: null,
+          otherNonOperatingAssets: null,
           currency: q.currency || null,
           exchange: q.fullExchangeName || q.exchange || null,
           instrumentType: q.quoteType || null,
@@ -207,6 +222,10 @@ async function fetchYahooQuote(ticker) {
     quickRatio: null,
     bookValue: null,
     enterpriseValue: null,
+    beta: null,
+    preferredStock: null,
+    minorityInterest: null,
+    otherNonOperatingAssets: null,
     currency: meta.currency || null,
     exchange: meta.exchangeName || meta.fullExchangeName || null,
     instrumentType: meta.instrumentType || null,
@@ -227,6 +246,15 @@ const FUNDAMENTAL_TYPES = [
   "annualDilutedAverageShares",
   "annualDepreciationAndAmortization",
   "annualInterestExpense",
+  "annualReceivables",
+  "annualAccountsReceivable",
+  "annualInventory",
+  "annualPrepaidAssets",
+  "annualOtherCurrentAssets",
+  "annualPayables",
+  "annualAccountsPayable",
+  "annualCurrentAccruedExpenses",
+  "annualPayablesAndAccruedExpenses",
   "annualRepurchaseOfCapitalStock",
   "annualCashDividendsPaid",
   "quarterlyCashCashEquivalentsAndShortTermInvestments",
@@ -266,6 +294,14 @@ function yahooSeries(byType, tag) {
   }
   const first = values.values().next().value;
   return { values, taxonomy: "yahoo-finance", tag, label: first?.label || tag, unit: first?.unit || "USD" };
+}
+
+function firstYahooSeries(byType, tags) {
+  for (const tag of tags) {
+    const series = yahooSeries(byType, tag);
+    if (series.values.size) return series;
+  }
+  return yahooSeries(byType, tags[0]);
 }
 
 function latestYahooFact(byType, tags) {
@@ -324,7 +360,12 @@ async function fetchYahooFinancials(ticker) {
     dilutedShares: yahooSeries(byType, "annualDilutedAverageShares"),
     buybackCash: yahooSeries(byType, "annualRepurchaseOfCapitalStock"),
     buybackShares: empty("Unavailable"),
-    dividendsPaid: yahooSeries(byType, "annualCashDividendsPaid")
+    dividendsPaid: yahooSeries(byType, "annualCashDividendsPaid"),
+    accountsReceivable: firstYahooSeries(byType, ["annualReceivables", "annualAccountsReceivable"]),
+    inventory: yahooSeries(byType, "annualInventory"),
+    prepaidExpenses: firstYahooSeries(byType, ["annualPrepaidAssets", "annualOtherCurrentAssets"]),
+    accountsPayable: firstYahooSeries(byType, ["annualAccountsPayable", "annualPayables"]),
+    accruedExpenses: firstYahooSeries(byType, ["annualCurrentAccruedExpenses", "annualPayablesAndAccruedExpenses"])
   };
   const cash = latestYahooFact(byType, ["quarterlyCashCashEquivalentsAndShortTermInvestments", "quarterlyCashAndCashEquivalents"]);
   const totalDebt = latestYahooFact(byType, ["quarterlyTotalDebt"]);
@@ -332,7 +373,7 @@ async function fetchYahooFinancials(ticker) {
   const currencies = [...series.revenue.values.values()].map((fact) => fact.unit).filter(Boolean);
   return {
     series,
-    latest: { cash, totalDebt, shortDebt, longDebt: null, sharesOutstanding: null },
+    latest: { cash, totalDebt, shortDebt, longDebt: null, sharesOutstanding: null, preferredStock: null, minorityInterest: null },
     financialCurrency: currencies[0] || "USD"
   };
 }

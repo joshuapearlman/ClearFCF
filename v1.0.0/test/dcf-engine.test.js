@@ -61,6 +61,28 @@ test("automatic cases produce ordered revenue paths", () => {
   assert.ok(base.at(-1).revenue < bull.at(-1).revenue);
 });
 
+test("automatic forecast builds operating NWC from its five disclosed components", () => {
+  const history = [
+    { year: 2025, revenue: 100, ebit: 15, dna: 4, capex: 5, accountsReceivable: 10, inventory: 8, prepaidExpenses: 2, accountsPayable: 7, accruedExpenses: 3, netWorkingCapital: 10 },
+    { year: 2024, revenue: 90, ebit: 13, dna: 4, capex: 5, accountsReceivable: 9, inventory: 7.2, prepaidExpenses: 1.8, accountsPayable: 6.3, accruedExpenses: 2.7, netWorkingCapital: 9 }
+  ];
+  const forecast = dcf.autoForecastWithDrivers(history, 2, "base", {
+    revenueMethod: "latest",
+    accountsReceivableMargin: 0.10,
+    inventoryMargin: 0.08,
+    prepaidExpensesMargin: 0.02,
+    accountsPayableMargin: 0.07,
+    accruedExpensesMargin: 0.03
+  });
+  for (const row of forecast) {
+    assert.ok(Math.abs(row.operatingCurrentAssets - (row.accountsReceivable + row.inventory + row.prepaidExpenses)) < 1e-10);
+    assert.ok(Math.abs(row.operatingCurrentLiabilities - (row.accountsPayable + row.accruedExpenses)) < 1e-10);
+    assert.ok(Math.abs(row.netWorkingCapital - (row.operatingCurrentAssets - row.operatingCurrentLiabilities)) < 1e-10);
+  }
+  assert.ok(Math.abs(forecast[0].changeInNwc - (forecast[0].netWorkingCapital - 10)) < 1e-10);
+  assert.ok(Math.abs(forecast[1].changeInNwc - (forecast[1].netWorkingCapital - forecast[0].netWorkingCapital)) < 1e-10);
+});
+
 test("explicit forecast drivers select different revenue and margin methods", () => {
   const history = [
     { year: 2025, revenue: 160, ebit: 32, effectiveTaxRate: 0.21, dna: 6, capex: 7, changeInNwc: 1 },

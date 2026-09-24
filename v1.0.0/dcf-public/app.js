@@ -5,8 +5,7 @@ const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const CASES = ["bear", "base", "bull"];
 const CASE_LABELS = { bear: "Bear", base: "Base", bull: "Bull" };
-const MONEY_FIELDS = new Set(["revenue", "ebit", "dna", "capex", "changeInNwc"]);
-const STORAGE_PREFIX = "clearfcf-financial-analysis-v1:";
+const STORAGE_PREFIX = "clearfcf-financial-analysis-v2:";
 
 const state = {
   report: null,
@@ -16,6 +15,7 @@ const state = {
   activeCase: "base",
   cases: {},
   bridge: {},
+  bridgeSources: {},
   snapshots: []
 };
 
@@ -62,17 +62,29 @@ function defaultWacc(report) {
   const interest = recent.find((row) => finite(row.interest))?.interest;
   const debt = number(report.valuation?.debt);
   const estimatedDebtCost = debt > 0 && finite(interest) ? Math.min(0.20, Math.max(0.01, Math.abs(interest) / debt)) : 0.05;
+  const yahooBeta = report.quote?.beta;
   return {
     mode: "calculated",
     riskFreeRate: 0.0425,
-    beta: 1,
+    beta: finite(yahooBeta) ? number(yahooBeta) : 1,
     equityRiskPremium: 0.05,
     additionalPremium: 0,
     preTaxCostOfDebt: estimatedDebtCost,
     taxRate,
     equityValue: number(report.valuation?.marketCap),
     debtValue: debt,
-    manualWacc: 0.09
+    manualWacc: 0.09,
+    sources: {
+      riskFreeRate: "Model starting assumption — replace with the current Treasury yield",
+      beta: finite(yahooBeta) ? "Yahoo Finance beta" : "Model fallback because Yahoo beta was unavailable",
+      equityRiskPremium: "Model starting assumption — user editable",
+      additionalPremium: "User input",
+      preTaxCostOfDebt: debt > 0 && finite(interest) ? "Latest SEC interest expense ÷ debt" : "Model fallback because debt cost inputs were unavailable",
+      taxRate: "Average effective tax rate from selected SEC history",
+      equityValue: report.valuation?.marketCapSource || report.sources?.marketCap || "ClearFCF market data",
+      debtValue: report.valuation?.debtSource || report.sources?.debt || "ClearFCF balance-sheet data",
+      manualWacc: "User input"
+    }
   };
 }
 
@@ -81,7 +93,26 @@ function defaultDrivers() {
     revenueMethod: "cagr5",
     terminalRevenueGrowth: 0.03,
     ebitMarginMethod: "average5",
-    terminalEbitMargin: null
+    terminalEbitMargin: null,
+    dnaMargin: null,
+    capexMargin: null,
+    accountsReceivableMargin: null,
+    inventoryMargin: null,
+    prepaidExpensesMargin: null,
+    accountsPayableMargin: null,
+    accruedExpensesMargin: null
+  };
+}
+
+function bridgeSourceMap(report) {
+  return {
+    cash: report.valuation?.cashSource || report.sources?.cash || "ClearFCF balance-sheet data",
+    nonOperatingAssets: report.valuation?.otherNonOperatingAssetsSource || report.sources?.otherNonOperatingAssets || "Not available — review before relying on the bridge",
+    debt: report.valuation?.debtSource || report.sources?.debt || "ClearFCF balance-sheet data",
+    preferredStock: report.valuation?.preferredStockSource || report.sources?.preferredStock || "Not available — review before relying on the bridge",
+    minorityInterest: report.valuation?.minorityInterestSource || report.sources?.minorityInterest || "Not available — review before relying on the bridge",
+    shares: report.valuation?.sharesSource || report.sources?.shares || "ClearFCF diluted-share data",
+    currentPrice: report.valuation?.priceSource || report.sources?.price || "Yahoo Finance market price"
   };
 }
 
@@ -92,7 +123,7 @@ function makeCase(name, report) {
     drivers,
     forecast: dcf.autoForecastWithDrivers(report.rows.slice(0, state.historicalYears), state.forecastYears, name, drivers),
     wacc: defaultWacc(report),
-    terminal: { method: "perpetuity", growthRate: terminalDefaults[0], exitMetric: "ebitda", exitMultiple: terminalDefaults[1] }
+    terminal: { method: "perpetuity", growthRate: terminalDefaults[0], exitMetric: "ebit", exitMultiple: terminalDefaults[1] }
   };
 }
 
@@ -104,22 +135,28 @@ function initializeModel(report) {
     state.convention = stored.convention === "mid-year" ? "mid-year" : "year-end";
     state.cases = stored.cases;
     state.bridge = stored.bridge;
+    state.bridgeSources = stored.bridgeSources || {};
     state.snapshots = Array.isArray(stored.snapshots) ? stored.snapshots : [];
     for (const name of CASES) if (!state.cases?.[name]) state.cases[name] = makeCase(name, report);
   } else {
     state.cases = Object.fromEntries(CASES.map((name) => [name, makeCase(name, report)]));
     state.bridge = {
       cash: number(report.valuation?.cash),
-      nonOperatingAssets: 0,
+      nonOperatingAssets: finite(report.valuation?.otherNonOperatingAssets) ? number(report.valuation.otherNonOperatingAssets) : null,
       debt: number(report.valuation?.debt),
-      preferredStock: 0,
-      minorityInterest: 0,
+      preferredStock: finite(report.valuation?.preferredStock) ? number(report.valuation.preferredStock) : null,
+      minorityInterest: finite(report.valuation?.minorityInterest) ? number(report.valuation.minorityInterest) : null,
       shares: number(report.valuation?.shares),
       currentPrice: number(report.valuation?.price)
     };
+    state.bridgeSources = bridgeSourceMap(report);
     state.snapshots = [];
   }
-  for (const name of CASES) state.cases[name].drivers = { ...defaultDrivers(), ...(state.cases[name].drivers || {}) };
+  state.bridgeSources = { ...bridgeSourceMap(report), ...state.bridgeSources };
+  for (const name of CASES) {
+    state.cases[name].drivers = { ...defaultDrivers(), ...(state.cases[name].drivers || {}) };
+    if (state.cases[name].terminal?.exitMetric === "ebitda") state.cases[name].terminal.exitMetric = "ebit";
+  }
   normalizeForecastLengths();
 }
 
@@ -135,6 +172,7 @@ function save() {
     convention: state.convention,
     cases: state.cases,
     bridge: state.bridge,
+    bridgeSources: state.bridgeSources,
     snapshots: state.snapshots
   }));
   const node = $("#save-state");
@@ -149,6 +187,25 @@ function normalizeForecastLengths() {
     if (current.length === state.forecastYears) continue;
     const generated = dcf.autoForecastWithDrivers(state.report.rows.slice(0, state.historicalYears), state.forecastYears, name, state.cases[name].drivers);
     state.cases[name].forecast = generated.map((row, index) => current[index] ? { ...row, ...current[index], year: row.year } : row);
+  }
+}
+
+function recalculateForecastWorkingCapital(model) {
+  const latestHistorical = state.report.rows.slice(0, state.historicalYears).find((row) => finite(row.netWorkingCapital));
+  let priorNwc = number(latestHistorical?.netWorkingCapital);
+  for (const row of model.forecast) {
+    row.operatingCurrentAssets = number(row.accountsReceivable) + number(row.inventory) + number(row.prepaidExpenses);
+    row.operatingCurrentLiabilities = number(row.accountsPayable) + number(row.accruedExpenses);
+    row.netWorkingCapital = row.operatingCurrentAssets - row.operatingCurrentLiabilities;
+    row.changeInNwc = row.netWorkingCapital - priorNwc;
+    priorNwc = row.netWorkingCapital;
+    row.sources = {
+      ...(row.sources || {}),
+      operatingCurrentAssets: "A/R + inventory + prepaids",
+      operatingCurrentLiabilities: "A/P + accrued expenses",
+      netWorkingCapital: "Operating current assets − liabilities",
+      changeInNwc: "Current operating NWC − prior operating NWC"
+    };
   }
 }
 
@@ -200,12 +257,23 @@ function renderHistorical() {
     ["Effective tax rate", "effectiveTaxRate", percent],
     ["D&A", "dna", compact],
     ["Capital expenditures", "capex", compact],
+    ["Accounts receivable", "accountsReceivable", compact],
+    ["Inventory", "inventory", compact],
+    ["Prepaid expenses", "prepaidExpenses", compact],
+    ["Operating current assets", "operatingCurrentAssets", compact],
+    ["Accounts payable", "accountsPayable", compact],
+    ["Accrued expenses", "accruedExpenses", compact],
+    ["Operating current liabilities", "operatingCurrentLiabilities", compact],
     ["Operating NWC", "netWorkingCapital", compact],
     ["Change in NWC", "changeInNwc", compact]
   ];
   $("#historical-table").innerHTML = `<table><thead><tr><th>Reported metric</th>${rows.map((row) => `<th>${row.year}</th>`).join("")}</tr></thead><tbody>${metrics.map(([label, key, formatter]) => `<tr><td class="row-label">${label}</td>${rows.map((row) => {
     const value = row[key];
-    const evidenceKey = key === "ebit" ? "operatingIncome" : key === "effectiveTaxRate" ? "incomeTaxExpense" : key === "netWorkingCapital" || key === "changeInNwc" ? "currentAssets" : key;
+    const evidenceKey = key === "ebit" ? "operatingIncome"
+      : key === "effectiveTaxRate" ? "incomeTaxExpense"
+        : key === "operatingCurrentAssets" ? "accountsReceivable"
+          : key === "operatingCurrentLiabilities" ? "accountsPayable"
+            : key === "netWorkingCapital" || key === "changeInNwc" ? "accountsReceivable" : key;
     return `<td class="${finite(value) ? "" : "missing"}" title="${escapeHtml(evidenceTitle(row, evidenceKey))}">${formatter(value, row)}${finite(value) ? '<i class="source-dot"></i>' : ""}</td>`;
   }).join("")}</tr>`).join("")}</tbody></table>`;
 }
@@ -214,17 +282,14 @@ function renderTrends() {
   const rows = state.report.rows.slice(0, state.historicalYears).reverse();
   const body = rows.map((row, index) => {
     const prior = rows[index - 1];
-    const ebitda = finite(row.ebit) || finite(row.dna) ? number(row.ebit) + number(row.dna) : null;
-    const priorEbitda = prior && (finite(prior.ebit) || finite(prior.dna)) ? number(prior.ebit) + number(prior.dna) : null;
     return `<tr>
       <td class="row-label">${row.year}</td>
       <td>${compact(row.revenue)}</td><td class="${number(change(row.revenue, prior?.revenue)) >= 0 ? "positive" : "negative"}">${signedCompact(change(row.revenue, prior?.revenue))}</td><td>${percent(growth(row.revenue, prior?.revenue))}</td>
-      <td>${compact(ebitda)}</td><td class="${number(change(ebitda, priorEbitda)) >= 0 ? "positive" : "negative"}">${signedCompact(change(ebitda, priorEbitda))}</td><td>${percent(growth(ebitda, priorEbitda))}</td><td>${percent(ratio(ebitda, row.revenue))}</td>
-      <td>${compact(row.ebit)}</td><td>${percent(growth(row.ebit, prior?.ebit))}</td><td>${percent(ratio(row.ebit, row.revenue))}</td>
+      <td>${compact(row.ebit)}</td><td class="${number(change(row.ebit, prior?.ebit)) >= 0 ? "positive" : "negative"}">${signedCompact(change(row.ebit, prior?.ebit))}</td><td>${percent(growth(row.ebit, prior?.ebit))}</td><td>${percent(ratio(row.ebit, row.revenue))}</td>
       <td>${compact(row.ocf)}</td><td>${compact(row.fcf)}</td><td>${percent(ratio(row.fcf, row.revenue))}</td><td>${percent(growth(row.shares, prior?.shares))}</td>
     </tr>`;
   }).join("");
-  $("#trend-table").innerHTML = `<table class="wide-table"><thead><tr><th>Year</th><th>Revenue</th><th>Δ revenue</th><th>Revenue growth</th><th>EBITDA</th><th>Δ EBITDA</th><th>EBITDA growth</th><th>EBITDA margin</th><th>EBIT</th><th>EBIT growth</th><th>EBIT margin</th><th>Operating cash flow</th><th>FCF</th><th>FCF margin</th><th>Share change</th></tr></thead><tbody>${body}</tbody></table>`;
+  $("#trend-table").innerHTML = `<table class="wide-table"><thead><tr><th>Year</th><th>Revenue</th><th>Δ revenue</th><th>Revenue growth</th><th>EBIT</th><th>Δ EBIT</th><th>EBIT growth</th><th>EBIT margin</th><th>Operating cash flow</th><th>FCF</th><th>FCF margin</th><th>Share change</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 
 function methodLabel(method, type) {
@@ -242,12 +307,26 @@ function renderDrivers() {
   const rows = state.report.rows.slice(0, state.historicalYears);
   const growthRates = dcf.historicalGrowthRates(rows, 5);
   const margins = rows.filter((row) => finite(row.ebit) && number(row.revenue)).slice(0, 5).map((row) => row.ebit / row.revenue);
+  const assumptions = dcf.historicalAssumptions(rows);
   if (!finite(drivers.terminalEbitMargin)) drivers.terminalEbitMargin = margins[0] ?? average(margins) ?? 0.12;
+  for (const key of ["dnaMargin", "capexMargin", "accountsReceivableMargin", "inventoryMargin", "prepaidExpensesMargin", "accountsPayableMargin", "accruedExpensesMargin"]) {
+    if (!finite(drivers[key])) drivers[key] = assumptions[key];
+  }
   const revenueOptions = [["cagr5", "5-year CAGR"], ["cagr3", "3-year CAGR"], ["latest", "Latest YoY growth"], ["average", "Average YoY growth"], ["median", "Median YoY growth"], ["fade", "Fade to long-run rate"]];
   const marginOptions = [["average5", "5-year average"], ["average3", "3-year average"], ["latest", "Latest margin"], ["median", "Median margin"], ["fade", "Fade to target margin"]];
   $("#driver-card").innerHTML = `<div class="driver-grid">
     <div class="driver-block"><p class="eyebrow">Top-line method</p><h3>Revenue growth</h3>${field("Forecast method", "revenueMethod", drivers.revenueMethod, { group: "driver", select: revenueOptions })}${field("Long-run revenue growth", "terminalRevenueGrowth", drivers.terminalRevenueGrowth, { group: "driver", percent: true, hint: "Used when the fade method is selected." })}<p class="method-note">Active rule: <strong>${escapeHtml(methodLabel(drivers.revenueMethod, "revenue"))}</strong>. Rebuilding applies this rule to every forecast year.</p></div>
     <div class="driver-block"><p class="eyebrow">Profitability method</p><h3>EBIT margin</h3>${field("Forecast method", "ebitMarginMethod", drivers.ebitMarginMethod, { group: "driver", select: marginOptions })}${field("Target EBIT margin", "terminalEbitMargin", drivers.terminalEbitMargin, { group: "driver", percent: true, hint: "Used when the fade method is selected." })}<p class="method-note">Active rule: <strong>${escapeHtml(methodLabel(drivers.ebitMarginMethod, "margin"))}</strong>. Bear and bull cases retain their explicit margin adjustments.</p></div>
+    <div class="driver-block full"><p class="eyebrow">Reinvestment and working-capital drivers</p><h3>Forecast D&A, CapEx and operating NWC</h3>
+      ${field("D&A / revenue", "dnaMargin", drivers.dnaMargin, { group: "driver", percent: true, hint: "Historical average from the selected years." })}
+      ${field("CapEx / revenue", "capexMargin", drivers.capexMargin, { group: "driver", percent: true, hint: "Historical average from the selected years." })}
+      ${field("Accounts receivable / revenue", "accountsReceivableMargin", drivers.accountsReceivableMargin, { group: "driver", percent: true })}
+      ${field("Inventory / revenue", "inventoryMargin", drivers.inventoryMargin, { group: "driver", percent: true })}
+      ${field("Prepaid expenses / revenue", "prepaidExpensesMargin", drivers.prepaidExpensesMargin, { group: "driver", percent: true })}
+      ${field("Accounts payable / revenue", "accountsPayableMargin", drivers.accountsPayableMargin, { group: "driver", percent: true })}
+      ${field("Accrued expenses / revenue", "accruedExpensesMargin", drivers.accruedExpensesMargin, { group: "driver", percent: true })}
+      <p class="method-note"><strong>Operating NWC = A/R + inventory + prepaids − A/P − accrued expenses.</strong> Change in NWC is the current period’s operating NWC minus the prior period’s operating NWC and is subtracted in FCFF. Edit these ratios, then click Rebuild this case.</p>
+    </div>
     <div class="anchor-strip"><div><span>Latest growth</span><strong>${percent(growthRates[0])}</strong></div><div><span>3Y revenue CAGR</span><strong>${percent(dcf.cagr(rows, 3))}</strong></div><div><span>5Y revenue CAGR</span><strong>${percent(dcf.cagr(rows, 5))}</strong></div><div><span>Median YoY growth</span><strong>${percent(dcf.median(growthRates))}</strong></div><div><span>Latest EBIT margin</span><strong>${percent(margins[0])}</strong></div><div><span>5Y average margin</span><strong>${percent(average(margins))}</strong></div></div>
   </div>`;
 }
@@ -282,7 +361,15 @@ function renderForecast() {
     ["NOPAT", "nopat", "calculated"],
     ["D&A", "dna", "money"],
     ["Capital expenditures", "capex", "money"],
-    ["Change in NWC", "changeInNwc", "money"],
+    ["Accounts receivable", "accountsReceivable", "money"],
+    ["Inventory", "inventory", "money"],
+    ["Prepaid expenses", "prepaidExpenses", "money"],
+    ["Operating current assets", "operatingCurrentAssets", "calculated"],
+    ["Accounts payable", "accountsPayable", "money"],
+    ["Accrued expenses", "accruedExpenses", "money"],
+    ["Operating current liabilities", "operatingCurrentLiabilities", "calculated"],
+    ["Operating NWC", "netWorkingCapital", "calculated"],
+    ["Change in NWC", "changeInNwc", "calculated"],
     ["Unlevered FCFF", "fcff", "calculated"],
     ["Discount factor", "discountFactor", "factor"],
     ["Present value", "presentValue", "calculated"]
@@ -308,17 +395,19 @@ function field(label, key, value, options = {}) {
 function renderWacc() {
   const model = state.cases[state.activeCase];
   const wacc = dcf.calculateWacc(model.wacc);
+  const sources = model.wacc.sources || {};
   $("#wacc-card").innerHTML = `<div class="form-grid">
     ${field("WACC mode", "mode", model.wacc.mode, { group: "wacc", select: [["calculated", "Calculate from inputs"], ["manual", "Manual WACC"]], wide: true })}
-    ${field("Risk-free rate", "riskFreeRate", model.wacc.riskFreeRate, { group: "wacc", percent: true })}
-    ${field("Beta", "beta", model.wacc.beta, { group: "wacc" })}
-    ${field("Equity risk premium", "equityRiskPremium", model.wacc.equityRiskPremium, { group: "wacc", percent: true })}
-    ${field("Additional premium", "additionalPremium", model.wacc.additionalPremium, { group: "wacc", percent: true })}
-    ${field("Pre-tax cost of debt", "preTaxCostOfDebt", model.wacc.preTaxCostOfDebt, { group: "wacc", percent: true })}
-    ${field("Tax rate", "taxRate", model.wacc.taxRate, { group: "wacc", percent: true })}
-    ${field("Market value of equity ($M)", "equityValue", model.wacc.equityValue, { group: "wacc", money: true })}
-    ${field("Debt value ($M)", "debtValue", model.wacc.debtValue, { group: "wacc", money: true })}
-    ${model.wacc.mode === "manual" ? field("Manual WACC", "manualWacc", model.wacc.manualWacc, { group: "wacc", percent: true, wide: true }) : ""}
+    ${field("Risk-free rate", "riskFreeRate", model.wacc.riskFreeRate, { group: "wacc", percent: true, hint: sources.riskFreeRate })}
+    ${field("Beta", "beta", model.wacc.beta, { group: "wacc", hint: sources.beta })}
+    ${field("Equity risk premium", "equityRiskPremium", model.wacc.equityRiskPremium, { group: "wacc", percent: true, hint: sources.equityRiskPremium })}
+    ${field("Additional premium", "additionalPremium", model.wacc.additionalPremium, { group: "wacc", percent: true, hint: sources.additionalPremium })}
+    ${field("Pre-tax cost of debt", "preTaxCostOfDebt", model.wacc.preTaxCostOfDebt, { group: "wacc", percent: true, hint: sources.preTaxCostOfDebt })}
+    ${field("Tax rate", "taxRate", model.wacc.taxRate, { group: "wacc", percent: true, hint: sources.taxRate })}
+    ${field("Market value of equity ($M)", "equityValue", model.wacc.equityValue, { group: "wacc", money: true, hint: sources.equityValue })}
+    ${field("Debt value ($M)", "debtValue", model.wacc.debtValue, { group: "wacc", money: true, hint: sources.debtValue })}
+    ${model.wacc.mode === "manual" ? field("Manual WACC", "manualWacc", model.wacc.manualWacc, { group: "wacc", percent: true, wide: true, hint: sources.manualWacc }) : ""}
+    <div class="formula-box"><strong>Calculated WACC</strong><span>E ÷ (D + E) × cost of equity + D ÷ (D + E) × pre-tax debt cost × (1 − tax rate)</span><small>Cost of equity = risk-free rate + beta × equity risk premium + additional premium.</small></div>
     <div class="calculation-strip"><div><span>Cost of equity</span><strong>${percent(wacc.costOfEquity, 2)}</strong></div><div><span>After-tax debt cost</span><strong>${percent(wacc.afterTaxCostOfDebt, 2)}</strong></div><div><span>Active WACC</span><strong>${percent(wacc.wacc, 2)}</strong></div></div>
   </div>`;
 }
@@ -327,11 +416,16 @@ function renderTerminal() {
   const model = state.cases[state.activeCase];
   const result = dcf.calculateCase(model, state.bridge, state.convention);
   const terminal = model.terminal;
+  const finalYear = result.years.at(-1) || {};
+  const terminalFormula = terminal.method === "perpetuity"
+    ? `TV = final-year FCFF × (1 + g) ÷ (WACC − g) = ${compact(finalYear.fcff)} × (1 + ${percent(terminal.growthRate, 2)}) ÷ (${percent(result.wacc, 2)} − ${percent(terminal.growthRate, 2)})`
+    : `TV = final-year ${terminal.exitMetric === "fcff" ? "FCFF" : "EBIT"} × exit multiple`;
   $("#terminal-card").innerHTML = `<div class="form-grid">
     ${field("Terminal method", "method", terminal.method, { group: "terminal", select: [["perpetuity", "Perpetuity growth"], ["exit", "Exit multiple"]], wide: true })}
     ${terminal.method === "perpetuity"
-      ? field("Terminal growth rate", "growthRate", terminal.growthRate, { group: "terminal", percent: true, wide: true, hint: "Must remain below WACC." })
-      : `${field("Exit metric", "exitMetric", terminal.exitMetric, { group: "terminal", select: [["ebitda", "EV / EBITDA"], ["ebit", "EV / EBIT"], ["fcff", "EV / FCFF"]] })}${field("Exit multiple", "exitMultiple", terminal.exitMultiple, { group: "terminal" })}`}
+      ? field("Terminal growth rate", "growthRate", terminal.growthRate, { group: "terminal", percent: true, wide: true, hint: `Must remain below the active WACC of ${percent(result.wacc, 2)}.` })
+      : `${field("Exit metric", "exitMetric", terminal.exitMetric, { group: "terminal", select: [["ebit", "EV / EBIT"], ["fcff", "EV / FCFF"]] })}${field("Exit multiple", "exitMultiple", terminal.exitMultiple, { group: "terminal" })}`}
+    <div class="formula-box"><strong>Terminal-value formula</strong><span>${terminalFormula}</span><small>WACC reference: ${percent(result.wacc, 2)} from the active case’s WACC section. There is no separate terminal discount-rate input.</small></div>
     <div class="calculation-strip"><div><span>Terminal value</span><strong>${compact(result.terminalValue)}</strong></div><div><span>Present value</span><strong>${compact(result.terminalPresentValue)}</strong></div><div><span>Share of EV</span><strong>${percent(result.terminalShare)}</strong></div></div>
   </div>`;
 }
@@ -341,7 +435,8 @@ function renderBridge() {
     ["Cash", "cash"], ["Other non-operating assets", "nonOperatingAssets"], ["Debt", "debt"],
     ["Preferred stock", "preferredStock"], ["Non-controlling interest", "minorityInterest"], ["Diluted shares", "shares"]
   ];
-  $("#bridge-card").innerHTML = `<div class="bridge-grid">${fields.map(([label, key]) => field(`${label} ($M)`, key, state.bridge[key], { group: "bridge", money: true })).join("")}${field("Current share price", "currentPrice", state.bridge.currentPrice, { group: "bridge" })}</div>`;
+  const source = (key) => state.bridgeSources[key] || "Source unavailable — review this input";
+  $("#bridge-card").innerHTML = `<div class="bridge-grid">${fields.map(([label, key]) => field(key === "shares" ? "Diluted shares (M)" : `${label} ($M)`, key, state.bridge[key], { group: "bridge", money: true, hint: source(key) })).join("")}${field("Current share price", "currentPrice", state.bridge.currentPrice, { group: "bridge", hint: source("currentPrice") })}<div class="formula-box bridge-formula"><strong>Enterprise value to equity value</strong><span>Equity value = enterprise value + cash + other non-operating assets − debt − preferred stock − non-controlling interest.</span><small>${finite(state.report.quote?.enterpriseValue) ? `Yahoo Finance reported enterprise-value cross-check: ${compact(state.report.quote.enterpriseValue)}.` : "Yahoo Finance reported enterprise value was unavailable for this company."}</small></div></div>`;
 }
 
 function renderOutputs() {
@@ -421,7 +516,7 @@ function renderSnapshots() {
 function renderAudit() {
   const result = dcf.calculateCase(state.cases[state.activeCase], state.bridge, state.convention);
   const report = state.report;
-  const missing = ["ebit", "effectiveTaxRate", "dna", "capex", "changeInNwc"].filter((key) => !report.rows.slice(0, state.historicalYears).some((row) => finite(row[key])));
+  const missing = ["ebit", "effectiveTaxRate", "dna", "capex", "accountsReceivable", "inventory", "prepaidExpenses", "accountsPayable", "accruedExpenses"].filter((key) => !report.rows.slice(0, state.historicalYears).some((row) => finite(row[key])));
   const warnings = [...result.warnings];
   if (missing.length) warnings.push(`Historical SEC coverage is incomplete for: ${missing.join(", ")}. Automatic defaults were used where necessary.`);
   if (report.isFinancial) warnings.push("Conventional industrial-company FCFF is generally unsuitable for banking and insurance businesses.");
@@ -435,7 +530,7 @@ function renderAudit() {
   const caseResults = Object.fromEntries(CASES.map((name) => [name, dcf.calculateCase(state.cases[name], state.bridge, state.convention)]));
   const prices = CASES.map((name) => caseResults[name].impliedSharePrice);
   if (prices.every(finite) && !(prices[0] <= prices[1] && prices[1] <= prices[2])) warnings.push("Scenario ordering is inconsistent: Bear ≤ Base ≤ Bull does not hold for implied share price.");
-  $("#audit").innerHTML = `<div class="audit-grid"><div><h3>Model methodology</h3><p><strong>FCFF:</strong> EBIT × (1 − tax rate) + D&A − CapEx − change in operating NWC.</p><p><strong>Operating NWC:</strong> current assets − cash − current liabilities + current debt, where the required SEC concepts are available.</p><p><strong>Equity bridge:</strong> enterprise value + cash + other non-operating assets − debt − preferred stock − non-controlling interest.</p><p>Financial data source: <strong>${escapeHtml(report.sources?.financials || "Unavailable")}</strong>. Market data source: <strong>${escapeHtml(report.sources?.price || "Unavailable")}</strong>.</p></div><div><h3>Checks</h3><div class="warning-list">${warnings.length ? warnings.map((warning) => `<div class="warning">${escapeHtml(warning)}</div>`).join("") : '<div class="ok">No calculation errors detected for this case.</div>'}</div></div></div>`;
+  $("#audit").innerHTML = `<div class="audit-grid"><div><h3>Model methodology</h3><p><strong>FCFF:</strong> EBIT × (1 − tax rate) + D&A − CapEx − change in operating NWC.</p><p><strong>Operating current assets:</strong> accounts receivable + inventory + prepaid expenses.</p><p><strong>Operating current liabilities:</strong> accounts payable + accrued expenses.</p><p><strong>Operating NWC:</strong> operating current assets − operating current liabilities. Change in NWC equals current-period NWC minus prior-period NWC.</p><p><strong>Equity bridge:</strong> enterprise value + cash + other non-operating assets − debt − preferred stock − non-controlling interest.</p><p>Financial data source: <strong>${escapeHtml(report.sources?.financials || "Unavailable")}</strong>. Market data source: <strong>${escapeHtml(report.sources?.price || "Unavailable")}</strong>.</p></div><div><h3>Checks</h3><div class="warning-list">${warnings.length ? warnings.map((warning) => `<div class="warning">${escapeHtml(warning)}</div>`).join("") : '<div class="ok">No calculation errors detected for this case.</div>'}</div></div></div>`;
 }
 
 function renderAll() {
@@ -480,10 +575,12 @@ $("#auto-case").addEventListener("click", () => {
   const model = state.cases[state.activeCase];
   model.forecast = dcf.autoForecastWithDrivers(state.report.rows.slice(0, state.historicalYears), state.forecastYears, state.activeCase, model.drivers);
   updateAndRender();
+  showMessage(`Rebuilt the ${CASE_LABELS[state.activeCase]} case from the current assumptions.`);
 });
 $("#auto-all").addEventListener("click", () => {
   for (const name of CASES) state.cases[name].forecast = dcf.autoForecastWithDrivers(state.report.rows.slice(0, state.historicalYears), state.forecastYears, name, state.cases[name].drivers);
   updateAndRender();
+  showMessage("Rebuilt Bear, Base, and Bull from their current assumptions.");
 });
 $("#save-snapshot").addEventListener("click", saveSnapshot);
 $(".case-tabs").addEventListener("click", (event) => {
@@ -514,23 +611,31 @@ $("#workspace").addEventListener("change", (event) => {
       row.revenue = number(priorRevenue) * (1 + row.revenueGrowth);
       row.sources.revenue = "Calculated from growth";
     }
+    if (["accountsReceivable", "inventory", "prepaidExpenses", "accountsPayable", "accruedExpenses"].includes(fieldName)) {
+      recalculateForecastWorkingCapital(model);
+    }
   } else if (target.dataset.wacc) {
     model.wacc[target.dataset.wacc] = target.tagName === "SELECT" ? target.value
       : target.dataset.inputType === "money" ? fromMillions(target.value)
         : target.dataset.inputType === "percent" ? number(target.value) / 100
           : number(target.value);
+    if (target.dataset.wacc !== "mode") model.wacc.sources = { ...(model.wacc.sources || {}), [target.dataset.wacc]: "User input" };
   } else if (target.dataset.terminal) {
     model.terminal[target.dataset.terminal] = target.tagName === "SELECT" ? target.value
       : target.dataset.inputType === "percent" ? number(target.value) / 100
         : number(target.value);
   } else if (target.dataset.bridge) {
     state.bridge[target.dataset.bridge] = target.dataset.inputType === "money" ? fromMillions(target.value) : number(target.value);
+    state.bridgeSources[target.dataset.bridge] = "User input";
   } else if (target.dataset.driver) {
     const key = target.dataset.driver;
     model.drivers[key] = target.tagName === "SELECT" ? target.value
       : target.dataset.inputType === "percent" ? number(target.value) / 100
         : number(target.value);
-    model.forecast = dcf.autoForecastWithDrivers(state.report.rows.slice(0, state.historicalYears), state.forecastYears, state.activeCase, model.drivers);
+    save();
+    renderAll();
+    showMessage(`Updated the ${CASE_LABELS[state.activeCase]} assumption. Click “Rebuild this case” to apply it to the forecast.`);
+    return;
   } else return;
   updateAndRender();
 });
