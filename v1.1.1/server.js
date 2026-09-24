@@ -13,8 +13,8 @@ function resolvePublicDir() {
   const candidates = [
     path.join(__dirname, "public"),
     path.join(process.cwd(), "public"),
-    path.join(__dirname, "v1.0.0", "public"),
-    path.join(process.cwd(), "v1.0.0", "public")
+    path.join(__dirname, "v1.1.1", "public"),
+    path.join(process.cwd(), "v1.1.1", "public")
   ];
   for (const dir of candidates) {
     if (fs.existsSync(dir)) return dir;
@@ -26,8 +26,8 @@ function resolveFinancialPublicDir() {
   const candidates = [
     path.join(__dirname, "dcf-public"),
     path.join(process.cwd(), "dcf-public"),
-    path.join(__dirname, "v1.0.0", "dcf-public"),
-    path.join(process.cwd(), "v1.0.0", "dcf-public")
+    path.join(__dirname, "v1.1.1", "dcf-public"),
+    path.join(process.cwd(), "v1.1.1", "dcf-public")
   ];
   for (const dir of candidates) {
     if (fs.existsSync(dir)) return dir;

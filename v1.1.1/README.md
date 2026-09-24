@@ -6,13 +6,13 @@ A from-scratch, Vercel-ready normalized free-cash-flow idea screener. Multiple m
 
 The website and Mac app share this same codebase. Changes pushed to GitHub continue to deploy to the website through Vercel, while a new Mac build can be created from the same version whenever needed.
 
-> The folder is still named `v1.0.0` because Vercel uses it as the production Root Directory. Treat it as a stable deployment path, not as the current release number. The authoritative release version is the `version` field in `package.json`.
+> Vercel uses `v1.1.1` as the production Root Directory. The authoritative release version is the `version` field in `package.json`.
 
 SEC requests default to ClearFCF's monitored contact address and are throttled to five requests per second per server process. For hosted deployments, set `SEC_CONTACT_EMAIL` to a monitored address, or set the complete `SEC_USER_AGENT` value (for example, `ClearFCF/1.0 owner@example.com`).
 
 ## Running the Mac app
 
-From the Vercel root folder (`v1.0.0`):
+From the Vercel root folder (`v1.1.1`):
 
 ```sh
 pnpm install
