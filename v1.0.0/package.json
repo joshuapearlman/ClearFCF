@@ -1,6 +1,6 @@
 {
   "name": "clear-fcf-screener",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "private": true,
   "description": "Transparent normalized free-cash-flow stock screener for Vercel",
   "main": "server.js",

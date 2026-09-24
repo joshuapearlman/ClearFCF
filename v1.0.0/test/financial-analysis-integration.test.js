@@ -27,6 +27,7 @@ test("Financial Deep Analysis is served by the main ClearFCF application", () =>
   assert.match(financialIndex, /\/financial-analysis\/engine\.js/);
   assert.match(financialIndex, /\/financial-analysis\/app\.js/);
   assert.match(financialIndex, /href="\/"/);
+  assert.match(read("dcf-public/app.js"), /syncVisibleDriverInputs\(model\)/);
 
   for (const source of [server, desktopServer]) {
     assert.match(source, /"\/financial-analysis": "index\.html"/);

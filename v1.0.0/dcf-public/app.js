@@ -559,6 +559,15 @@ function updateAndRender() {
   renderAll();
 }
 
+function syncVisibleDriverInputs(model) {
+  $$("#driver-card [data-driver]").forEach((target) => {
+    const key = target.dataset.driver;
+    model.drivers[key] = target.tagName === "SELECT" ? target.value
+      : target.dataset.inputType === "percent" ? number(target.value) / 100
+        : number(target.value);
+  });
+}
+
 $("#ticker-form").addEventListener("submit", (event) => {
   event.preventDefault();
   loadTicker($("#ticker").value);
@@ -573,11 +582,13 @@ $("#forecast-years").addEventListener("change", (event) => {
 $("#discount-convention").addEventListener("change", (event) => { state.convention = event.target.value; updateAndRender(); });
 $("#auto-case").addEventListener("click", () => {
   const model = state.cases[state.activeCase];
+  syncVisibleDriverInputs(model);
   model.forecast = dcf.autoForecastWithDrivers(state.report.rows.slice(0, state.historicalYears), state.forecastYears, state.activeCase, model.drivers);
   updateAndRender();
   showMessage(`Rebuilt the ${CASE_LABELS[state.activeCase]} case from the current assumptions.`);
 });
 $("#auto-all").addEventListener("click", () => {
+  syncVisibleDriverInputs(state.cases[state.activeCase]);
   for (const name of CASES) state.cases[name].forecast = dcf.autoForecastWithDrivers(state.report.rows.slice(0, state.historicalYears), state.forecastYears, name, state.cases[name].drivers);
   updateAndRender();
   showMessage("Rebuilt Bear, Base, and Bull from their current assumptions.");
