@@ -25,6 +25,37 @@
     return requested === "3" || requested === "5" ? requested : "all";
   }
 
+  function marketDate(timestamp) {
+    const date = new Date(timestamp);
+    if (!Number.isFinite(date.getTime())) return null;
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit"
+    }).formatToParts(date);
+    const fields = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${fields.year}-${fields.month}-${fields.day}`;
+  }
+
+  function marketDataFreshness(asOf, now = Date.now()) {
+    if (!asOf) return "missing";
+    const quoteTime = Date.parse(asOf);
+    const currentTime = new Date(now).getTime();
+    if (!Number.isFinite(quoteTime) || !Number.isFinite(currentTime)) return "missing";
+    if (quoteTime > currentTime + 5 * 60 * 1000) return "stale";
+    const quoteDate = marketDate(quoteTime);
+    const currentDate = marketDate(currentTime);
+    if (!quoteDate || !currentDate || quoteDate > currentDate) return "stale";
+    let businessDays = 0;
+    const cursor = new Date(`${quoteDate}T12:00:00Z`);
+    const end = new Date(`${currentDate}T12:00:00Z`);
+    while (cursor < end) {
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+      const day = cursor.getUTCDay();
+      if (day !== 0 && day !== 6) businessDays += 1;
+      if (businessDays > 1) return "stale";
+    }
+    return "fresh";
+  }
+
   function selectedMetrics(row, criteria = {}) {
     const lookback = lookbackKey(criteria);
     const nested = row?.valuation?.lookbacks?.[lookback];
@@ -99,6 +130,17 @@
     const currencyValid = row?.currencyConversionValid !== false && (!quoteCurrency || quoteCurrency === "USD");
     if (!currencyValid) fail.push("Currency conversion is unavailable or the quote is not USD");
 
+    const instrumentType = row?.quoteInstrumentType ?? row?.quote?.instrumentType;
+    if (instrumentType && instrumentType !== "EQUITY") {
+      excluded.push("Market quote is no longer an active equity listing");
+    }
+    if (Object.hasOwn(row || {}, "marketDataAsOf")) {
+      const freshness = marketDataFreshness(row.marketDataAsOf);
+      if (freshness === "missing") fail.push("Market price timestamp is unavailable");
+      else if (freshness === "stale") fail.push(`Market price is stale (last quote ${marketDate(row.marketDataAsOf) || "unknown"})`);
+      else pass.push("Market price is current");
+    }
+
     if (!finite(selected.priceToNfcf) || selected.priceToNfcf <= 0) unknown.push("Normalized FCF valuation is unavailable");
     else recordMax("P/nFCF", selected.priceToNfcf, threshold(criteria.maxMultiple, 15));
     if (!finite(selected.normalizedEconomicFcf)) unknown.push("Economic normalized FCF is unavailable because SBC history is incomplete");
@@ -164,5 +206,5 @@
     return { status, passes: pass, failures: fail, unknowns: unknown, exclusions: excluded, reasons, selected };
   }
 
-  return { evaluateCandidate, selectedMetrics, lookbackKey };
+  return { evaluateCandidate, selectedMetrics, lookbackKey, marketDataFreshness };
 });

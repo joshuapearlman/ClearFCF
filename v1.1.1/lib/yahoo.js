@@ -142,7 +142,7 @@ async function fetchYahooQuote(ticker) {
             saleCount: finite(sellCount) ? sellCount : null,
             netShares: finite(netShares) ? netShares : null,
             averagePurchasePrice: purchaseShares > 0 && purchaseValue > 0 ? purchaseValue / purchaseShares : null,
-            purchases: directPurchases.slice(0, 5),
+            purchases: directPurchases.sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 20),
             source: "Yahoo Finance insider transactions"
           },
           marketTime: pMod?.regularMarketTime ? new Date(pMod.regularMarketTime * 1000).toISOString() : null,

@@ -185,6 +185,7 @@ function makeCase(name, report) {
   return {
     drivers,
     forecast: dcf.autoForecastWithDrivers(report.rows.slice(0, state.historicalYears), state.forecastYears, name, drivers),
+    manualOverrides: {},
     wacc: defaultWacc(report),
     terminal: { method: "perpetuity", growthRate: terminalDefaults[0], exitMetric: "ebit", exitMultiple: terminalDefaults[1] }
   };
@@ -248,9 +249,19 @@ function normalizeForecastLengths() {
   for (const name of CASES) {
     const current = state.cases[name].forecast || [];
     if (current.length === state.forecastYears) continue;
-    const generated = dcf.autoForecastWithDrivers(state.report.rows.slice(0, state.historicalYears), state.forecastYears, name, state.cases[name].drivers);
-    state.cases[name].forecast = generated.map((row, index) => current[index] ? { ...row, ...current[index], year: row.year } : row);
+    rebuildCase(name);
   }
+}
+
+function rebuildCase(name) {
+  const model = state.cases[name];
+  const history = state.report.rows.slice(0, state.historicalYears);
+  const generated = dcf.autoForecastWithDrivers(history, state.forecastYears, name, model.drivers);
+  const merged = dcf.mergeManualForecast(generated, model.forecast, model.manualOverrides,
+    history.find((row) => finite(row.revenue))?.revenue);
+  model.forecast = merged.forecast;
+  model.manualOverrides = merged.overrides;
+  recalculateForecastWorkingCapital(model);
 }
 
 function recalculateForecastWorkingCapital(model) {
@@ -615,8 +626,13 @@ function saveSnapshot() {
     enterpriseValue: result.enterpriseValue,
     finalRevenue: lastYear.revenue,
     finalEbitMargin: ratio(lastYear.ebit, lastYear.revenue),
+    historicalYears: state.historicalYears,
     forecastYears: state.forecastYears,
-    drivers: { ...model.drivers }
+    convention: state.convention,
+    drivers: { ...model.drivers },
+    case: JSON.parse(JSON.stringify(model)),
+    bridge: { ...state.bridge },
+    bridgeSources: { ...state.bridgeSources }
   });
   state.snapshots = state.snapshots.slice(0, 20);
   updateAndRender();
@@ -628,7 +644,22 @@ function renderSnapshots() {
     $("#snapshot-card").innerHTML = '<div class="empty-inline">No saved forecasts yet. Save the current case before earnings or after an assumption change to preserve a scorecard.</div>';
     return;
   }
-  $("#snapshot-card").innerHTML = `<div class="snapshot-list">${state.snapshots.map((item) => `<article class="snapshot"><div><p class="eyebrow">${escapeHtml(CASE_LABELS[item.caseName] || item.caseName)} case · ${item.forecastYears} years</p><h3>${new Date(item.savedAt).toLocaleString()}</h3><p>${escapeHtml(methodLabel(item.drivers?.revenueMethod, "revenue"))} · ${escapeHtml(methodLabel(item.drivers?.ebitMarginMethod, "margin"))}</p></div><dl><div><dt>Implied price</dt><dd>${perShare(item.impliedSharePrice)}</dd></div><div><dt>Upside / downside</dt><dd>${percent(item.upside)}</dd></div><div><dt>Terminal-year revenue</dt><dd>${compact(item.finalRevenue)}</dd></div><div><dt>Terminal EBIT margin</dt><dd>${percent(item.finalEbitMargin)}</dd></div></dl></article>`).join("")}</div>`;
+  $("#snapshot-card").innerHTML = `<div class="snapshot-list">${state.snapshots.map((item) => `<article class="snapshot"><div><p class="eyebrow">${escapeHtml(CASE_LABELS[item.caseName] || item.caseName)} case · ${item.forecastYears} years</p><h3>${new Date(item.savedAt).toLocaleString()}</h3><p>${escapeHtml(methodLabel(item.drivers?.revenueMethod, "revenue"))} · ${escapeHtml(methodLabel(item.drivers?.ebitMarginMethod, "margin"))}</p>${item.case ? `<button type="button" class="secondary" data-restore-snapshot="${escapeHtml(item.id)}">Restore this case</button>` : ""}</div><dl><div><dt>Implied price</dt><dd>${perShare(item.impliedSharePrice)}</dd></div><div><dt>Upside / downside</dt><dd>${percent(item.upside)}</dd></div><div><dt>Terminal-year revenue</dt><dd>${compact(item.finalRevenue)}</dd></div><div><dt>Terminal EBIT margin</dt><dd>${percent(item.finalEbitMargin)}</dd></div></dl></article>`).join("")}</div>`;
+}
+
+function restoreSnapshot(id) {
+  const snapshot = state.snapshots.find((item) => item.id === id && item.case);
+  if (!snapshot) return;
+  state.activeCase = snapshot.caseName;
+  state.historicalYears = snapshot.historicalYears || state.historicalYears;
+  state.forecastYears = snapshot.forecastYears;
+  state.convention = snapshot.convention || state.convention;
+  state.cases[snapshot.caseName] = JSON.parse(JSON.stringify(snapshot.case));
+  state.bridge = { ...snapshot.bridge };
+  state.bridgeSources = { ...snapshot.bridgeSources };
+  for (const name of CASES) if (name !== snapshot.caseName) rebuildCase(name);
+  updateAndRender();
+  showMessage(`Restored the saved ${CASE_LABELS[snapshot.caseName]} case.`);
 }
 
 function renderAudit() {
@@ -702,13 +733,21 @@ $("#discount-convention").addEventListener("change", (event) => { state.conventi
 $("#auto-case").addEventListener("click", () => {
   const model = state.cases[state.activeCase];
   syncVisibleDriverInputs(model);
-  model.forecast = dcf.autoForecastWithDrivers(state.report.rows.slice(0, state.historicalYears), state.forecastYears, state.activeCase, model.drivers);
+  rebuildCase(state.activeCase);
   updateAndRender();
   showMessage(`Rebuilt the ${CASE_LABELS[state.activeCase]} case from the current assumptions.`);
 });
+$("#clear-manual-case").addEventListener("click", () => {
+  const model = state.cases[state.activeCase];
+  model.manualOverrides = {};
+  model.forecast = [];
+  rebuildCase(state.activeCase);
+  updateAndRender();
+  showMessage(`Cleared manual edits in the ${CASE_LABELS[state.activeCase]} case.`);
+});
 $("#auto-all").addEventListener("click", () => {
   syncVisibleDriverInputs(state.cases[state.activeCase]);
-  for (const name of CASES) state.cases[name].forecast = dcf.autoForecastWithDrivers(state.report.rows.slice(0, state.historicalYears), state.forecastYears, name, state.cases[name].drivers);
+  for (const name of CASES) rebuildCase(name);
   updateAndRender();
   showMessage("Rebuilt Bear, Base, and Bull from their current assumptions.");
 });
@@ -722,7 +761,7 @@ $("#driver-card").addEventListener("click", (event) => {
   model.drivers.dnaMarginMethod = method;
   model.drivers.capexMarginMethod = method;
   model.drivers.nwcMethod = method;
-  model.forecast = dcf.autoForecastWithDrivers(state.report.rows.slice(0, state.historicalYears), state.forecastYears, state.activeCase, model.drivers);
+  rebuildCase(state.activeCase);
   updateAndRender();
   showMessage(`Applied the ${ratioMethodLabel(method)} to D&A, CapEx, and all operating-NWC components, then rebuilt the ${CASE_LABELS[state.activeCase]} case.`);
 });
@@ -744,6 +783,11 @@ $("#workspace").addEventListener("change", (event) => {
       : target.dataset.inputType === "percent" ? number(target.value) / 100
         : number(target.value);
     row.sources = { ...(row.sources || {}), [fieldName]: "User input" };
+    model.manualOverrides ||= {};
+    const year = String(row.year);
+    model.manualOverrides[year] = { ...model.manualOverrides[year], [fieldName]: row[fieldName] };
+    if (fieldName === "revenue") delete model.manualOverrides[year].revenueGrowth;
+    if (fieldName === "revenueGrowth") delete model.manualOverrides[year].revenue;
     if (fieldName === "revenue") {
       const rowIndex = Number(target.dataset.forecastIndex);
       const priorRevenue = rowIndex > 0 ? model.forecast[rowIndex - 1]?.revenue : state.report.rows.find((item) => finite(item.revenue))?.revenue;
@@ -784,6 +828,8 @@ $("#workspace").addEventListener("change", (event) => {
 });
 
 $("#workspace").addEventListener("click", (event) => {
+  const restore = event.target.closest("[data-restore-snapshot]");
+  if (restore) return restoreSnapshot(restore.dataset.restoreSnapshot);
   const button = event.target.closest("[data-collapse-section]");
   if (!button) return;
   const header = button.closest(".section-head[data-collapse-id]");

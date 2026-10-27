@@ -101,18 +101,30 @@ test("under-investment check flags CapEx well below Depreciation", () => {
   assert.equal(quality.capexToDnaRatio, 1 / 3);
 });
 
-test("buyback allocation audit correctly computes average buyback price and accretive rating", () => {
+test("buyback audit reports an implied price without awarding a value-creation badge", () => {
   const rows = [
     { fcf: 100, revenue: 1000, buybackCash: 50_000_000, buybackShares: 1_000_000, shares: 10_000_000, fcfMargin: 0.1 },
     { fcf: 100, revenue: 1000, buybackCash: 50_000_000, buybackShares: 1_000_000, shares: 11_000_000, fcfMargin: 0.1 }
   ];
   // Total cash = 100M, total shares = 2M -> avg buyback price = $50
-  // Current price = $70 -> 50 / 70 = ~0.714 (<= 0.85 -> Accretive)
+  // A current price comparison does not establish intrinsic value at repurchase.
   const quality = computeQuality(rows, { usableYears: 6 }, 70);
   assert.equal(quality.buybackAudit.totalCashSpent, 100_000_000);
   assert.equal(quality.buybackAudit.totalSharesRepurchased, 2_000_000);
   assert.equal(quality.buybackAudit.averageBuybackPrice, 50);
-  assert.equal(quality.buybackAudit.rating, "Accretive");
+  assert.equal(quality.buybackAudit.rating, "Unverified");
+  assert.match(quality.buybackAudit.reason, /not reconciled/);
+});
+
+test("buyback audit flags a share-count discontinuity instead of guessing a split factor", () => {
+  const rows = [
+    { year: 2025, fcf: 100, revenue: 1000, buybackCash: 100_000_000, buybackShares: 1_000_000, shares: 160_000_000, fcfMargin: 0.1 },
+    { year: 2024, fcf: 100, revenue: 1000, buybackCash: 100_000_000, buybackShares: 1_000_000, shares: 27_800_000, fcfMargin: 0.1 }
+  ];
+  const audit = computeQuality(rows, { usableYears: 6 }, 100).buybackAudit;
+  assert.equal(audit.rating, "Unreliable");
+  assert.equal(audit.totalSharesRepurchased, 2_000_000);
+  assert.match(audit.reason, /split/);
 });
 
 test("buyback audit only combines years with matched cash and share evidence", () => {

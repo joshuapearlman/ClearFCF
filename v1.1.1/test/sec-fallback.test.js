@@ -27,12 +27,12 @@ test("analysis falls back to Yahoo fundamentals when SEC returns 403", async () 
     const href = String(url);
     if (href.includes("sec.gov")) return json({ error: "blocked" }, 403);
     if (href.includes("quoteSummary")) return json({ quoteSummary: { result: [{
-      price: { regularMarketPrice: { raw: 10 }, marketCap: { raw: 1_000_000_000 }, currency: "USD", quoteType: "EQUITY", longName: "Fallback Company" },
+      price: { regularMarketPrice: { raw: 10 }, regularMarketTime: Math.floor(Date.now() / 1000), marketCap: { raw: 1_000_000_000 }, currency: "USD", quoteType: "EQUITY", longName: "Fallback Company" },
       defaultKeyStatistics: { sharesOutstanding: { raw: 100_000_000 }, fiveYearAvgDividendYield: { raw: 1.8 } },
       financialData: { totalDebt: { raw: 100_000_000 }, totalCash: { raw: 200_000_000 } },
       assetProfile: { sector: "Technology", industry: "Software" },
       summaryDetail: { dividendYield: { raw: 0.024 }, dividendRate: { raw: 0.24 }, exDividendDate: { raw: Date.parse("2026-08-01") / 1000 } },
-      insiderTransactions: { transactions: [{ filerName: "A Director", transactionText: "Purchase", shares: { raw: 10_000 }, value: { raw: 100_000 }, startDate: { raw: Date.parse("2026-07-01") / 1000 } }] },
+      insiderTransactions: { transactions: [{ filerName: "A Director", transactionText: "Purchase", shares: { raw: 10_000 }, value: { raw: 100_000 }, startDate: { raw: Math.floor(Date.now() / 1000) - 10 * 86400 } }] },
       netSharePurchaseActivity: { period: "6m", buyInfoCount: { raw: 1 }, sellInfoCount: { raw: 0 }, netInfoShares: { raw: 10_000 } }
     }] } });
     if (href.includes("fundamentals-timeseries")) {

@@ -105,6 +105,42 @@
     return autoForecastWithDrivers(rows, years, caseName, {});
   }
 
+  const editableForecastFields = ["revenue", "revenueGrowth", "ebit", "taxRate", "dna", "capex",
+    "accountsReceivable", "inventory", "prepaidExpenses", "accountsPayable", "accruedExpenses"];
+
+  function mergeManualForecast(generated, previous = [], savedOverrides = {}, latestRevenue = null) {
+    const overrides = { ...savedOverrides };
+    // Migrate cases saved before overrides were tracked separately.
+    for (const oldRow of previous || []) {
+      const year = String(oldRow?.year || "");
+      if (!year) continue;
+      for (const field of editableForecastFields) {
+        if (oldRow.sources?.[field] !== "User input" || !finite(oldRow[field])) continue;
+        overrides[year] = { ...overrides[year], [field]: overrides[year]?.[field] ?? oldRow[field] };
+      }
+    }
+    let priorRevenue = finite(latestRevenue) ? Number(latestRevenue) : null;
+    const forecast = generated.map((generatedRow) => {
+      const manual = overrides[String(generatedRow.year)] || {};
+      const row = { ...generatedRow, sources: { ...generatedRow.sources } };
+      for (const field of editableForecastFields) {
+        if (!Object.hasOwn(manual, field) || !finite(manual[field])) continue;
+        row[field] = Number(manual[field]);
+        row.sources[field] = "User input";
+      }
+      if (Object.hasOwn(manual, "revenue") && finite(row.revenue) && priorRevenue > 0) {
+        row.revenueGrowth = row.revenue / priorRevenue - 1;
+        row.sources.revenueGrowth = "Calculated from revenue";
+      } else if (Object.hasOwn(manual, "revenueGrowth") && finite(row.revenueGrowth) && priorRevenue > 0) {
+        row.revenue = priorRevenue * (1 + row.revenueGrowth);
+        row.sources.revenue = "Calculated from growth";
+      }
+      priorRevenue = row.revenue;
+      return row;
+    });
+    return { forecast, overrides };
+  }
+
   function autoForecastWithDrivers(rows, years, caseName = "base", drivers = {}) {
     const assumptions = historicalAssumptions(rows);
     const adjustment = caseName === "bear"
@@ -112,7 +148,8 @@
       : caseName === "bull"
         ? { growth: 0.02, ebit: 0.02, capex: -0.005 }
         : { growth: 0, ebit: 0, capex: 0 };
-    const latestYear = Math.max(...(rows || []).map((row) => number(row.year)).filter(Boolean), new Date().getFullYear() - 1);
+    const reportedYears = (rows || []).map((row) => number(row.year)).filter(Boolean);
+    const latestYear = reportedYears.length ? Math.max(...reportedYears) : new Date().getFullYear() - 1;
     const growthRates = historicalGrowthRates(rows, 5);
     const latestGrowth = growthRates[0] ?? assumptions.revenueGrowth;
     const revenueMethod = drivers.revenueMethod || "cagr5";
@@ -353,6 +390,7 @@
     historicalAssumptions,
     autoForecast,
     autoForecastWithDrivers,
+    mergeManualForecast,
     backtestForecast,
     calculateFcffYear,
     calculateWacc,

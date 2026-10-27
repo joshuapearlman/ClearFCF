@@ -9,6 +9,31 @@ function valueForYear(series, year) {
   return series?.values?.get(year)?.val ?? null;
 }
 
+function insiderSignalEvidence(purchases, now = Date.now()) {
+  const cutoff = new Date(now);
+  const originalDay = cutoff.getUTCDate();
+  cutoff.setUTCDate(1);
+  cutoff.setUTCMonth(cutoff.getUTCMonth() - 6);
+  const lastDayOfMonth = new Date(Date.UTC(cutoff.getUTCFullYear(), cutoff.getUTCMonth() + 1, 0)).getUTCDate();
+  cutoff.setUTCDate(Math.min(originalDay, lastDayOfMonth));
+  const cutoffDay = cutoff.toISOString().slice(0, 10);
+  const currentDay = new Date(now).toISOString().slice(0, 10);
+  const recentPurchases = (purchases || []).filter((item) => {
+    const date = Date.parse(item.date);
+    const day = Number.isFinite(date) ? new Date(date).toISOString().slice(0, 10) : null;
+    return day && day >= cutoffDay && day <= currentDay;
+  });
+  const totalPurchaseShares = recentPurchases.reduce((sum, item) => sum + (finite(item.shares) ? item.shares : 0), 0);
+  const totalPurchaseValue = recentPurchases.reduce((sum, item) => sum + (finite(item.value) ? item.value : 0), 0);
+  const buyers = [...new Set(recentPurchases.map((item) => item.name).filter(Boolean))];
+  const clusterBuying = buyers.length >= 2 && totalPurchaseValue >= 50_000;
+  const materialBuying = clusterBuying || recentPurchases.some((item) =>
+    (finite(item.value) && item.value >= 50_000)
+      || (finite(item.sharesAfter) && item.sharesAfter > 0 && finite(item.shares) && item.shares / item.sharesAfter >= 0.01));
+  return { recentPurchases, totalPurchaseShares, totalPurchaseValue, buyers, clusterBuying, materialBuying,
+    latestPurchaseDate: recentPurchases.map((item) => item.date).sort().at(-1) || null };
+}
+
 function evidenceForYear(series, year) {
   const fact = series?.values?.get(year);
   if (!fact) return null;
@@ -412,34 +437,25 @@ function computeQuality(rows, normalized, currentPrice = null) {
   const totalDna = usable.reduce((sum, r) => sum + (r.dna || 0), 0);
   const capexToDnaRatio = totalDna > 0 ? totalCapex / totalDna : null;
 
-  // 1. Share Buyback Capital Allocation Audit (with SEC unit scale check)
+  // 1. Share Buyback Audit. SEC cash and share facts imply a price, but do not
+  // establish intrinsic value or reconcile to the issuer's repurchase table.
   const pairedBuybackRows = rows.filter((row) => finite(row.buybackCash) && row.buybackCash > 0 && finite(row.buybackShares) && row.buybackShares > 0);
   const totalBuybackCash = pairedBuybackRows.reduce((sum, r) => sum + Math.abs(r.buybackCash), 0);
-  let totalBuybackShares = pairedBuybackRows.reduce((sum, r) => sum + Math.abs(r.buybackShares), 0);
-  let averageBuybackPrice = totalBuybackShares > 0 && totalBuybackCash > 0 ? totalBuybackCash / totalBuybackShares : null;
-
-  // SEC Unit Scaling Sanity Check: If shares were reported in thousands while cash was in exact dollars
-  if (finite(averageBuybackPrice) && finite(currentPrice) && currentPrice > 0) {
-    if (averageBuybackPrice / currentPrice > 5.0 && (averageBuybackPrice / 1000) / currentPrice <= 3.0 && (averageBuybackPrice / 1000) / currentPrice >= 0.1) {
-      totalBuybackShares = totalBuybackShares * 1000;
-      averageBuybackPrice = totalBuybackCash / totalBuybackShares;
-    }
-  }
-
-  let buybackAllocationRating = "No Buybacks";
+  const totalBuybackShares = pairedBuybackRows.reduce((sum, r) => sum + Math.abs(r.buybackShares), 0);
+  const averageBuybackPrice = totalBuybackShares > 0 && totalBuybackCash > 0 ? totalBuybackCash / totalBuybackShares : null;
+  const shareDiscontinuity = rows.some((row, index) => {
+    const older = rows[index + 1];
+    return finite(row.shares) && row.shares > 0 && finite(older?.shares) && older.shares > 0
+      && Math.abs(row.shares - older.shares) / Math.min(row.shares, older.shares) > 0.6;
+  });
+  const implausiblePrice = finite(averageBuybackPrice) && finite(currentPrice) && currentPrice > 0
+    && (averageBuybackPrice / currentPrice > 5 || averageBuybackPrice / currentPrice < 0.05);
+  const buybackAllocationRating = !pairedBuybackRows.length ? "No Buybacks"
+    : shareDiscontinuity || implausiblePrice ? "Unreliable" : "Unverified";
   let buybackPriceVsCurrent = null;
   if (finite(averageBuybackPrice)) {
     if (finite(currentPrice) && currentPrice > 0) {
       buybackPriceVsCurrent = averageBuybackPrice / currentPrice;
-      if (buybackPriceVsCurrent <= 0.85) {
-        buybackAllocationRating = "Accretive";
-      } else if (buybackPriceVsCurrent >= 1.25) {
-        buybackAllocationRating = buybackPriceVsCurrent > 5 ? "Unreliable" : "Value Destructive";
-      } else {
-        buybackAllocationRating = "Neutral";
-      }
-    } else {
-      buybackAllocationRating = "Active";
     }
   }
 
@@ -488,7 +504,14 @@ function computeQuality(rows, normalized, currentPrice = null) {
       averageBuybackPrice,
       buybackPriceVsCurrent,
       rating: buybackAllocationRating,
-      coverageYears: pairedBuybackRows.length
+      coverageYears: pairedBuybackRows.length,
+      shareDiscontinuity,
+      reason: shareDiscontinuity ? "Annual share counts change by more than 60%; a split or share-basis mismatch may distort the implied price."
+        : implausiblePrice ? "Implied repurchase price is implausible relative to the current quote; verify units and split adjustments."
+          : pairedBuybackRows.length ? "Implied from matched SEC cash and share facts; not reconciled to the issuer's repurchase disclosure."
+            : "No matched repurchase cash and share evidence.",
+      periods: pairedBuybackRows.map((row) => ({ year: row.year, cash: row.buybackCash, shares: row.buybackShares,
+        impliedPrice: row.buybackCash / row.buybackShares }))
     },
     fcfTrajectory,
     recent3yAvgMargin,
@@ -743,9 +766,11 @@ async function analyzeTicker(rawTicker, options = {}) {
 
   const shareSelection = selectValuationShares(rows, extracted.latest.sharesOutstanding);
   const shares = shareSelection.shares;
-  const price = finite(Number(options.price)) ? Number(options.price) : quoteResult.price;
+  const suppliedPrice = finite(Number(options.price)) && Number(options.price) > 0 ? Number(options.price) : null;
+  const price = suppliedPrice ?? quoteResult.price;
   const quality = computeQuality(rows, normalized, price);
   const suppliedMarketCap = finite(Number(options.marketCap)) && Number(options.marketCap) > 0 ? Number(options.marketCap) : null;
+  const marketDataAsOf = suppliedPrice || suppliedMarketCap ? null : quoteResult.marketTime || null;
   const yahooMarketCap = finite(Number(quoteResult?.marketCap)) && Number(quoteResult.marketCap) > 0 ? Number(quoteResult.marketCap) : null;
   const liveShares = finite(Number(quoteResult?.shares)) && Number(quoteResult.shares) > 0 ? Number(quoteResult.shares) : null;
 
@@ -846,21 +871,20 @@ async function analyzeTicker(rawTicker, options = {}) {
     source: quoteResult?.dividends?.source || "Unavailable"
   };
   const quotedInsiders = quoteResult?.insiders || {};
-  const authoritativePurchases = secInsiderPurchases.length ? secInsiderPurchases : (quotedInsiders.purchases || []);
+  const sourcePurchases = secInsiderPurchases.length ? secInsiderPurchases : (quotedInsiders.purchases || []);
+  const insiderEvidence = insiderSignalEvidence(sourcePurchases);
+  const authoritativePurchases = insiderEvidence.recentPurchases;
   const insiderDataAvailable = Boolean(quotedInsiders.source) || finite(quotedInsiders.saleCount) || finite(quotedInsiders.netShares);
-  const insiderPurchaseCount = secInsiderPurchases.length || (finite(quotedInsiders.purchaseCount) ? quotedInsiders.purchaseCount : 0);
+  const insiderPurchaseCount = authoritativePurchases.length;
   const hasInsiderBuying = insiderPurchaseCount > 0;
-  const totalPurchaseShares = authoritativePurchases.reduce((sum, item) => sum + (finite(item.shares) ? item.shares : 0), 0);
-  const totalPurchaseValue = authoritativePurchases.reduce((sum, item) => sum + (finite(item.value) ? item.value : 0), 0);
+  const { totalPurchaseShares, totalPurchaseValue, buyers, clusterBuying, materialBuying } = insiderEvidence;
   const averagePurchasePrice = totalPurchaseShares > 0 && totalPurchaseValue > 0
-    ? totalPurchaseValue / totalPurchaseShares : quotedInsiders.averagePurchasePrice;
-  const buyers = [...new Set(authoritativePurchases.map((item) => item.name).filter(Boolean))];
-  const clusterBuying = buyers.length >= 2;
+    ? totalPurchaseValue / totalPurchaseShares : null;
   const purchasePriceComparable = finite(averagePurchasePrice) && finite(price) && price > 0;
   const tradingNearInsiderBuys = purchasePriceComparable ? price <= averagePurchasePrice * 1.10 : null;
   const inexpensiveOnFcf = finite(valuation.priceToNfcf) && valuation.priceToNfcf > 0 && valuation.priceToNfcf <= 15;
   const insiders = {
-    period: quotedInsiders.period || "12 months",
+    period: "6 months",
     purchaseCount: insiderPurchaseCount,
     saleCount: finite(quotedInsiders.saleCount) ? quotedInsiders.saleCount : null,
     netShares: finite(quotedInsiders.netShares) ? quotedInsiders.netShares : null,
@@ -869,17 +893,19 @@ async function analyzeTicker(rawTicker, options = {}) {
     buyers,
     clusterBuying,
     largestPurchaseValue: authoritativePurchases.reduce((max, item) => Math.max(max, finite(item.value) ? item.value : 0), 0) || null,
-    latestPurchaseDate: authoritativePurchases.map((item) => item.date).filter(Boolean).sort().at(-1) || null,
+    latestPurchaseDate: insiderEvidence.latestPurchaseDate,
     hasRecentBuying: hasInsiderBuying,
+    hasQualifiedBuying: materialBuying,
     tradingNearInsiderBuys,
-    valueAligned: hasInsiderBuying && inexpensiveOnFcf && tradingNearInsiderBuys !== false,
+    valueAligned: materialBuying && inexpensiveOnFcf && tradingNearInsiderBuys !== false,
     signal: !insiderDataAvailable && !secInsiderPurchases.length ? "Unavailable"
       : !hasInsiderBuying ? "No recent buying found"
+      : !materialBuying ? "Small purchase; review context"
       : clusterBuying && inexpensiveOnFcf && tradingNearInsiderBuys !== false ? "Cluster buying + inexpensive FCF"
         : inexpensiveOnFcf && tradingNearInsiderBuys !== false ? "Buying + inexpensive FCF"
         : "Recent insider buying",
     source: secInsiderPurchases.length ? "SEC Form 4" : quotedInsiders.source || "Unavailable",
-    caveat: "A purchase can align with a low valuation, but the filing does not disclose that cheapness was the insider's motive."
+    caveat: "Recent means a dated purchase within six calendar months. A badge requires distinct buyers with $50,000 combined purchases, one $50,000 purchase, or a purchase of at least 1% of post-transaction holdings. A filing does not disclose the buyer's valuation thesis."
   };
   const ownerReturns = computeOwnerReturns(rows, normalized, marketCap, dividends);
   const valuationHistory = computeValuationHistory(rows, priceHistory, valuation, quoteResult);
@@ -926,10 +952,8 @@ async function analyzeTicker(rawTicker, options = {}) {
     warnings.push(`Deteriorating FCF trend: Recent 3-year average margin (${round(quality.recent3yAvgMargin * 100, 1)}%) has contracted compared to earlier baseline (${round(quality.baselineMargin * 100, 1)}%).`);
   }
   // Buyback capital allocation warning
-  if (quality.buybackAudit?.rating === "Value Destructive") {
-    warnings.push(`Historical buybacks appear destructive: Average repurchase price ($${round(quality.buybackAudit.averageBuybackPrice, 2)}) is significantly above current market price ($${round(price, 2)}).`);
-  } else if (quality.buybackAudit?.rating === "Unreliable") {
-    warnings.push("Buyback cash and repurchased-share disclosures do not produce a plausible average purchase price; the buyback rating is unavailable.");
+  if (quality.buybackAudit?.rating === "Unreliable") {
+    warnings.push(quality.buybackAudit.reason);
   }
 
   // SBC Burden check
@@ -971,6 +995,7 @@ async function analyzeTicker(rawTicker, options = {}) {
     ticker, companyName: submissions.name || company.title, cik: company.cik,
     company: { sic: submissions.sic || null, sicDescription: submissions.sicDescription || null, fiscalYearEnd: submissions.fiscalYearEnd || null, exchanges: submissions.exchanges || [], tickers: submissions.tickers || [] },
     quote: quoteResult,
+    marketDataAsOf,
     quoteCurrency,
     financialCurrency,
     currencyConversionValid,
@@ -1036,7 +1061,7 @@ function decisionSummary(report) {
   if (finite(report.dividends?.currentYield) && report.dividends.currentYield > 0) parts.push(`${round(report.dividends.currentYield * 100, 1)}% dividend yield`);
   if (finite(report.quality?.positiveFcfRatio)) parts.push(`positive FCF in ${round(report.quality.positiveFcfRatio * 100, 0)}% of usable years`);
   if (report.insiders?.clusterBuying) parts.push("recent cluster insider buying");
-  else if (report.insiders?.hasRecentBuying) parts.push("recent insider buying");
+  else if (report.insiders?.hasQualifiedBuying) parts.push("recent insider buying");
   const summary = `${report.status}: ${parts.slice(0, 4).join(", ") || report.primaryReason}.`;
   return report.status === "Idea" || !report.nonQualificationReason
     ? summary
@@ -1049,6 +1074,7 @@ function summary(report) {
     sic: Number(report.company?.sic) || null,
     isFinancial: report.isFinancial,
     quoteCurrency: report.quoteCurrency,
+    quoteInstrumentType: report.quote?.instrumentType || null,
     currencyConversionValid: report.currencyConversionValid,
     price: round(report.valuation.price), marketCap: round(report.valuation.marketCap),
     priceToNfcf: round(report.valuation.priceToNfcf),
@@ -1063,7 +1089,7 @@ function summary(report) {
     fiveYearDividendYield: round(report.dividends?.fiveYearAverageYield, 4),
     dividendRate: round(report.dividends?.annualRate, 4),
     exDividendDate: report.dividends?.exDividendDate || null,
-    insiderBuying: report.insiders?.hasRecentBuying === true,
+    insiderBuying: report.insiders?.hasQualifiedBuying === true,
     insiderPurchaseCount: report.insiders?.purchaseCount ?? 0,
     insiderNetShares: round(report.insiders?.netShares),
     insiderAveragePurchasePrice: round(report.insiders?.averagePurchasePrice, 2),
@@ -1082,7 +1108,7 @@ function summary(report) {
     valuationHistoryContext: report.valuationHistory?.context || "History unavailable",
     valuationMultiplePercentile: round(report.valuationHistory?.multiplePercentile, 4),
     drawdownFromHigh: round(report.valuationHistory?.drawdownFromHigh, 4),
-    marketDataAsOf: report.quote?.marketTime || null,
+    marketDataAsOf: report.marketDataAsOf,
     financialPeriodEnd: report.rows?.[0]?.evidence?.revenue?.periodEnd || String(report.rows?.[0]?.year || ""),
     primaryReason: report.primaryReason,
     nonQualificationReason: report.nonQualificationReason,
@@ -1118,6 +1144,7 @@ function summary(report) {
     marginSlope: round(report.quality.marginSlope, 4),
     buybackPrice: round(report.quality.buybackAudit?.averageBuybackPrice, 2),
     buybackRating: report.quality.buybackAudit?.rating || "N/A",
+    buybackAuditReason: report.quality.buybackAudit?.reason || null,
     netDebtToNfcf: round(report.valuation.netDebtToNfcf),
     netDebt: round(report.valuation.netDebt),
     enterpriseValue: round(report.valuation.enterpriseValue),
@@ -1171,6 +1198,7 @@ module.exports = {
   annualRows,
   normalize,
   computeQuality,
+  insiderSignalEvidence,
   computeOwnerReturns,
   computeValuationHistory,
   selectValuationShares,

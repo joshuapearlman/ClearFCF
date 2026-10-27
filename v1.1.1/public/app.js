@@ -104,7 +104,7 @@ function decisionText(row, evaluation) {
   const positiveRatio = row.positiveFcfRatio ?? row.quality?.positiveFcfRatio;
   if (typeof positiveRatio === "number") parts.push(`positive FCF in ${Math.round(positiveRatio * 100)}% of years`);
   if (row.insiderClusterBuying || row.insiders?.clusterBuying) parts.push("cluster insider buying");
-  else if (row.insiderBuying || row.insiders?.hasRecentBuying) parts.push("recent insider buying");
+  else if (row.insiderBuying || row.insiders?.hasQualifiedBuying) parts.push("recent insider buying");
   const reason = evaluation?.exclusions?.[0] || evaluation?.failures?.[0] || evaluation?.unknowns?.[0] || "all active qualification checks passed";
   const status = evaluation?.status || row.status;
   const summary = `${status}: ${parts.slice(0, 4).join(", ") || reason}.`;
@@ -112,7 +112,7 @@ function decisionText(row, evaluation) {
   return status === "Idea" || !reasons.length ? summary : `${summary} Why not Idea: ${reasons.join("; ")}.`;
 }
 
-const STORAGE_KEY = "clear-fcf-auto-v3";
+const STORAGE_KEY = "clear-fcf-auto-v4";
 const PERFORMANCE_KEY = "clear-fcf-performance-v1";
 const RESEARCH_STORAGE_KEY = "clear-fcf-deep-research-v1";
 const RESEARCH_SETTINGS_KEY = "clear-fcf-research-settings-v1";
@@ -388,7 +388,7 @@ function resultCell(row, key) {
   const cells = {
     ticker: () => companyCell(row),
     status: () => `<span class="badge ${String(row.status).toLowerCase()}">${escapeHtml(row.status)}</span>`,
-    price: () => compact(row.price, true),
+    price: () => `${compact(row.price, true)}<small class="cell-note">${row.marketDataAsOf ? `Price as of ${escapeHtml(new Date(row.marketDataAsOf).toLocaleDateString())}${screening.marketDataFreshness(row.marketDataAsOf) === "stale" ? " · stale" : ""}` : "Price date unavailable"}</small>`,
     marketCap: () => compact(row.marketCap, true),
     priceToNfcf: () => multiple(row.priceToNfcf),
     priceToEconomicNfcf: () => multiple(row.priceToEconomicNfcf),
@@ -400,7 +400,7 @@ function resultCell(row, key) {
     insiderSignal: () => `<span class="badge ${row.insiderValueAligned ? 'badge-blue' : row.insiderBuying ? 'badge-green' : ''}">${escapeHtml(row.insiderSignal || 'Unavailable')}</span>${row.latestInsiderPurchaseDate ? `<small class="cell-note">Latest ${escapeHtml(row.latestInsiderPurchaseDate)}</small>` : ''}`,
     economicFcfYield: () => percent(row.economicFcfYield),
     fcfTrajectory: () => `<span class="badge ${row.fcfTrajectory === 'Expanding' ? 'badge-green' : row.fcfTrajectory === 'Deteriorating' ? 'badge-amber' : ''}">${escapeHtml(row.fcfTrajectory || 'Stable')}</span>`,
-    buybackRating: () => `<span class="badge ${row.buybackRating === 'Accretive' ? 'badge-green' : row.buybackRating === 'Value Destructive' ? 'badge-amber' : ''}">${escapeHtml(row.buybackRating || 'N/A')}</span>`,
+    buybackRating: () => `<span class="badge ${row.buybackRating === 'Unreliable' ? 'badge-amber' : ''}" title="${escapeHtml(row.buybackAuditReason || '')}">${escapeHtml(row.buybackRating || 'N/A')}</span>`,
     capexToDnaRatio: () => row.capexToDnaRatio ? `${(row.capexToDnaRatio * 100).toFixed(0)}%` : "—",
     usableYears: () => `${escapeHtml(row.usableYears)} yrs`,
     netDebtToNfcf: () => multiple(row.netDebtToNfcf),
@@ -560,7 +560,7 @@ function renderTable(container, results, title, defaultStatus = "All") {
 }
 
 function exportCsv(results) {
-  const fields = ["ticker", "companyName", "status", "nonQualificationReason", "decisionSummary", "primaryReason", "price", "marketCap", "priceToNfcf", "priceToEconomicNfcf", "evToUnleveredNfcf", "fcfYield", "dividendYield", "fiveYearDividendYield", "dividendPayoutRatio", "dividendGrowth5y", "dividendYearsWithoutCut", "dividendCoverage", "shareholderYield", "buybackCashYield", "sbcYield", "netBuybackYield", "dividendRate", "exDividendDate", "insiderBuying", "insiderPurchaseCount", "insiderNetShares", "insiderAveragePurchasePrice", "insiderClusterBuying", "insiderValueAligned", "insiderSignal", "latestInsiderPurchaseDate", "valuationHistoryContext", "valuationMultiplePercentile", "drawdownFromHigh", "marketDataAsOf", "financialPeriodEnd", "economicFcfYield", "fcfTrajectory", "buybackRating", "buybackPrice", "capexToDnaRatio", "usableYears", "netDebtToNfcf", "shortDebt", "cash", "shareChange", "shareChangeYears", "shareChangeAnnualized", "normalizedSbcToFcf", "latestSbcToFcf"];
+  const fields = ["ticker", "companyName", "status", "nonQualificationReason", "decisionSummary", "primaryReason", "price", "marketCap", "priceToNfcf", "priceToEconomicNfcf", "evToUnleveredNfcf", "fcfYield", "dividendYield", "fiveYearDividendYield", "dividendPayoutRatio", "dividendGrowth5y", "dividendYearsWithoutCut", "dividendCoverage", "shareholderYield", "buybackCashYield", "sbcYield", "netBuybackYield", "dividendRate", "exDividendDate", "insiderBuying", "insiderPurchaseCount", "insiderNetShares", "insiderAveragePurchasePrice", "insiderClusterBuying", "insiderValueAligned", "insiderSignal", "latestInsiderPurchaseDate", "valuationHistoryContext", "valuationMultiplePercentile", "drawdownFromHigh", "marketDataAsOf", "financialPeriodEnd", "economicFcfYield", "fcfTrajectory", "buybackRating", "buybackAuditReason", "buybackPrice", "capexToDnaRatio", "usableYears", "netDebtToNfcf", "shortDebt", "cash", "shareChange", "shareChangeYears", "shareChangeAnnualized", "normalizedSbcToFcf", "latestSbcToFcf"];
   const quote = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
   const csv = [fields.join(","), ...results.map((row) => fields.map((key) => quote(row[key])).join(","))].join("\n");
   const link = document.createElement("a");
@@ -751,7 +751,7 @@ function renderInsiderEvidence(report) {
 
 function renderFreshness(report) {
   return `<div class="freshness-strip">
-    <span><b>Market data</b> ${escapeHtml(report.quote?.marketTime ? new Date(report.quote.marketTime).toLocaleString() : 'date unavailable')}</span>
+    <span><b>Market data</b> ${escapeHtml(report.marketDataAsOf ? new Date(report.marketDataAsOf).toLocaleString() : 'date unavailable')}</span>
     <span><b>Financial period</b> ${escapeHtml(report.rows?.[0]?.evidence?.revenue?.periodEnd || report.rows?.[0]?.year || 'unavailable')}</span>
     <span><b>Latest insider purchase</b> ${escapeHtml(report.insiders?.latestPurchaseDate || 'none found')}</span>
   </div>`;
@@ -970,9 +970,9 @@ function renderReport(report) {
     <div class="metric clickable" data-metric="economicFcfYield"><span>Economic FCF yield</span><strong>${percent(v.economicFcfYield)}</strong><span class="metric-hint">How it was calculated</span></div>
     <div class="metric clickable" data-metric="dividendYield"><span>Current dividend yield</span><strong>${percent(report.dividends?.currentYield)}</strong><small>${report.dividends?.annualRate ? `${compact(report.dividends.annualRate, true)} indicated annual dividend` : 'No current dividend rate available'}</small><span class="metric-hint">Source and interpretation</span></div>
     <div class="metric clickable" data-metric="fiveYearDividendYield"><span>5-year average dividend yield</span><strong>${percent(report.dividends?.fiveYearAverageYield)}</strong><small>Historical context; not a screening criterion</small><span class="metric-hint">Source and interpretation</span></div>
-    <div class="metric clickable" data-metric="insiderActivity"><span>Insider activity</span><strong class="${report.insiders?.valueAligned ? 'badge-blue' : report.insiders?.hasRecentBuying ? 'badge-green' : ''}">${escapeHtml(report.insiders?.signal || 'Unavailable')}</strong><small>${report.insiders?.purchaseCount || 0} purchase record${report.insiders?.purchaseCount === 1 ? '' : 's'} in ${escapeHtml(report.insiders?.period || 'the reported period')}</small><span class="metric-hint">Evidence and caveat</span></div>
+    <div class="metric clickable" data-metric="insiderActivity"><span>Insider activity</span><strong class="${report.insiders?.valueAligned ? 'badge-blue' : report.insiders?.hasQualifiedBuying ? 'badge-green' : ''}">${escapeHtml(report.insiders?.signal || 'Unavailable')}</strong><small>${report.insiders?.purchaseCount || 0} purchase record${report.insiders?.purchaseCount === 1 ? '' : 's'} in ${escapeHtml(report.insiders?.period || 'the reported period')}</small><span class="metric-hint">Evidence and caveat</span></div>
     <div class="metric clickable" data-metric="fcfTrajectory"><span>FCF Trajectory</span><strong class="${q.fcfTrajectory === 'Expanding' ? 'badge-green' : q.fcfTrajectory === 'Deteriorating' ? 'badge-amber' : ''}">${escapeHtml(q.fcfTrajectory || 'Stable')}</strong><span class="metric-hint">How it was calculated</span></div>
-    <div class="metric clickable" data-metric="buybackAudit"><span>Buyback Audit</span><strong class="${q.buybackAudit?.rating === 'Accretive' ? 'badge-green' : q.buybackAudit?.rating === 'Value Destructive' ? 'badge-amber' : ''}">${escapeHtml(q.buybackAudit?.rating || 'N/A')}</strong><small>${q.buybackAudit?.averageBuybackPrice ? `Avg paid: $${q.buybackAudit.averageBuybackPrice.toFixed(2)}` : 'No major repurchases'}</small><span class="metric-hint">How it was calculated</span></div>
+    <div class="metric clickable" data-metric="buybackAudit"><span>Buyback Audit</span><strong class="${q.buybackAudit?.rating === 'Unreliable' ? 'badge-amber' : ''}">${escapeHtml(q.buybackAudit?.rating || 'N/A')}</strong><small>${q.buybackAudit?.averageBuybackPrice ? `Implied avg: $${q.buybackAudit.averageBuybackPrice.toFixed(2)}` : 'No matched repurchases'}</small><span class="metric-hint">Evidence and caveat</span></div>
     <div class="metric clickable" data-metric="capexToDnaRatio"><span>CapEx / D&A</span><strong>${q.capexToDnaRatio ? `${(q.capexToDnaRatio * 100).toFixed(0)}%` : "—"}</strong><span class="metric-hint">How it was calculated</span></div>
     <div class="metric clickable" data-metric="netDebt"><span>Net debt</span><strong>${compact(v.netDebt, true)}</strong><span class="metric-hint">How it was calculated</span></div>
     <div class="metric clickable" data-metric="netDebtToNfcf"><span>Net debt/nFCF</span><strong>${multiple(v.netDebtToNfcf)}</strong><span class="metric-hint">How it was calculated</span></div>
@@ -1039,7 +1039,7 @@ function renderReport(report) {
 
   <div class="report-card report-detail methodology-card">
     <h3>Sources and Methodology</h3>
-    <p>Financials: <strong>${escapeHtml(report.sources.financials || "Unavailable")}</strong>. Price: <strong>${escapeHtml(report.sources.price || "Unavailable")}</strong>. Analyzed ${escapeHtml(new Date(report.analyzedAt).toLocaleString())}.</p>
+    <p>Financials: <strong>${escapeHtml(report.sources.financials || "Unavailable")}</strong> (period ended ${escapeHtml(report.rows?.[0]?.evidence?.revenue?.periodEnd || "unavailable")}). Price: <strong>${escapeHtml(report.sources.price || "Unavailable")}</strong> (as of ${report.marketDataAsOf ? escapeHtml(new Date(report.marketDataAsOf).toLocaleString()) : "unavailable"}). Analyzed ${escapeHtml(new Date(report.analyzedAt).toLocaleString())}.</p>
     <p>Debt: <strong>${escapeHtml(report.sources.debt || "Unavailable")}</strong>. Cash: <strong>${escapeHtml(report.sources.cash || "Unavailable")}</strong>. Hover an annual period to inspect the exact XBRL concepts used for that year.</p>
   </div>`;
 }
@@ -1178,7 +1178,6 @@ async function runAuto() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tickers: batch,
-          quotes: batchRows.map(({ ticker, price, marketCap }) => ({ ticker, price, marketCap })),
           criteria: state.criteria,
           performance
         })
@@ -1603,9 +1602,9 @@ function getCalculationDetails(metric, report) {
       const ba = q.buybackAudit || {};
       return {
         title: 'Share Buyback Capital Allocation Audit',
-        formula: 'Avg Buyback Price = Cumulative Cash Spent on Repurchases ÷ Gross Shares Acquired',
-        substitution: `• Total Cash Spent on Buybacks: ${compact(ba.totalCashSpent, true)}\n• Total Shares Repurchased: ${compact(ba.totalSharesRepurchased)}\n• Implied Average Price Paid: $${(ba.averageBuybackPrice || 0).toFixed(2)} per share\n• Current Share Price: ${compact(price, true)}\n• Price Ratio (Paid vs. Current): ${ba.buybackPriceVsCurrent ? (ba.buybackPriceVsCurrent * 100).toFixed(0) + '%' : 'N/A'}\n• Capital Allocation Rating: ${ba.rating || 'N/A'}`,
-        meaning: 'Buybacks only create value if repurchased at a discount to intrinsic value. Repurchases at peak valuations destroy capital. Accretive rating indicates shares were bought back below current value.',
+        formula: 'Implied Buyback Price = Matched SEC repurchase cash ÷ matched SEC repurchased shares',
+        substitution: `• Matched cash: ${compact(ba.totalCashSpent, true)}\n• Matched shares: ${compact(ba.totalSharesRepurchased)}\n• Implied average: ${ba.averageBuybackPrice ? '$' + ba.averageBuybackPrice.toFixed(2) : 'Unavailable'} per share\n• Current price: ${compact(price, true)}\n• Matched years: ${ba.coverageYears || 0}\n• Audit status: ${ba.rating || 'N/A'}\n• ${ba.reason || 'No reconciliation available.'}${ba.periods?.length ? '\n• Annual implied prices: ' + ba.periods.map((item) => `${item.year}: $${item.impliedPrice.toFixed(2)}`).join(', ') : ''}`,
+        meaning: 'This is an implied historical price from structured SEC facts. It is not a measure of value creation and has not been reconciled with the issuer’s repurchase table.',
         sources: 'SEC EDGAR Statements of Cash Flow: us-gaap/PaymentsForRepurchaseOfCommonStock & TreasuryStockSharesAcquired'
       };
 

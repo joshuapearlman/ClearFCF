@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { evaluateCandidate, selectedMetrics } = require("../public/screening");
+const { evaluateCandidate, selectedMetrics, marketDataFreshness } = require("../public/screening");
 
 function completeReport() {
   return {
@@ -61,4 +61,26 @@ test("financial institutions are explicitly excluded", () => {
   assert.equal(result.status, "Excluded");
   assert.ok(result.exclusions.length > 0);
   assert.ok(result.reasons.some((reason) => reason.startsWith("Excluded:")));
+});
+
+test("quote freshness allows the prior trading session and gates older quotes", () => {
+  const tuesdayMorning = "2026-10-27T12:00:00Z";
+  assert.equal(marketDataFreshness("2026-10-26T20:00:00Z", tuesdayMorning), "fresh");
+  assert.equal(marketDataFreshness("2026-10-23T20:00:00Z", tuesdayMorning), "stale");
+  assert.equal(marketDataFreshness(null, tuesdayMorning), "missing");
+});
+
+test("missing or stale market data cannot appear as an Idea", () => {
+  const report = completeReport();
+  report.marketDataAsOf = null;
+  assert.equal(evaluateCandidate(report).status, "Review");
+  report.marketDataAsOf = "2020-10-23T20:00:00Z";
+  assert.equal(evaluateCandidate(report).status, "Review");
+  report.marketDataAsOf = new Date().toISOString();
+  assert.equal(evaluateCandidate(report).status, "Idea");
+  report.quote.instrumentType = "MUTUALFUND";
+  assert.equal(evaluateCandidate(report).status, "Excluded");
+  delete report.quote.instrumentType;
+  report.quoteInstrumentType = "MUTUALFUND";
+  assert.equal(evaluateCandidate(report).status, "Excluded");
 });

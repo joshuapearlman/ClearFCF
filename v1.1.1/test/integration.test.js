@@ -33,7 +33,7 @@ test("end-to-end analysis produces an Idea from mocked Yahoo and SEC data", asyn
       DebtCurrent: { label: "Current debt", units: { USD: [{ end: "2025-12-31", val: 0, form: "10-K", filed: "2026-02-15" }] } }
     } } });
     if (href.includes("submissions")) return json({ name: "Test Company", sic: "3571", sicDescription: "Electronic Computers", exchanges: ["Nasdaq"], tickers: ["TEST"], filings: { recent: { form: ["10-K"], filingDate: ["2026-02-15"], accessionNumber: ["0000000001-26-000001"], primaryDocument: ["test-2025.htm"] } } });
-    if (href.includes("finance/chart")) return json({ chart: { result: [{ meta: { regularMarketPrice: 10, currency: "USD", exchangeName: "NMS", instrumentType: "EQUITY", regularMarketTime: 1771113600 }, indicators: { quote: [{ close: [10] }] } }] } });
+    if (href.includes("finance/chart")) return json({ chart: { result: [{ meta: { regularMarketPrice: 10, currency: "USD", exchangeName: "NMS", instrumentType: "EQUITY", regularMarketTime: Math.floor(Date.now() / 1000) }, indicators: { quote: [{ close: [10] }] } }] } });
     throw new Error(`Unexpected URL: ${href}`);
   };
 
