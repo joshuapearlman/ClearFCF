@@ -575,9 +575,9 @@ function exportCsv(results) {
 
 function rowTable(rows) {
   return `<div class="table-scroll"><table><thead><tr>
-    <th>Period</th><th>Revenue</th><th>OCF</th><th>CapEx</th><th>Standard FCF</th><th>SBC</th><th>Economic FCF</th><th>D&A</th><th>Share count</th>
+    <th>Fiscal year</th><th>Revenue</th><th>OCF</th><th>CapEx</th><th>Standard FCF</th><th>SBC</th><th>Economic FCF</th><th>D&A</th><th>Share count</th>
   </tr></thead><tbody>${rows.map((row) => `<tr>
-    <td title="${escapeHtml(Object.entries(row.evidence || {}).filter(([, fact]) => fact?.tag).map(([key, fact]) => `${key}: ${fact.taxonomy}:${fact.tag} (${fact.form || "filing"}, filed ${fact.filed || "unknown"})`).join("\n"))}"><strong>${row.year}</strong></td>
+    <td title="${escapeHtml([row.periodEnd && `Fiscal ${row.year}, period ended ${row.periodEnd}`, ...Object.entries(row.evidence || {}).filter(([, fact]) => fact?.tag).map(([key, fact]) => `${key}: ${fact.taxonomy}:${fact.tag} (${fact.form || "filing"}, filed ${fact.filed || "unknown"})`)].filter(Boolean).join("\n"))}"><strong>${row.year}</strong></td>
     <td>${compact(row.revenue, true)}</td>
     <td>${compact(row.ocf, true)}</td>
     <td>${compact(row.capex, true)}</td>

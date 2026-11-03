@@ -26,6 +26,7 @@ test("browser screening asset loads before app.js and exposes its API", () => {
   assert.match(app, /Why this is not an Idea/);
   assert.match(app, /nonQualificationReason/);
   assert.match(app, /COLUMN_STORAGE_KEY/);
+  assert.match(app, /<th>Fiscal year<\/th>/);
   assert.match(app, /aria-selected/);
   assert.doesNotMatch(app, /✕ Pass/);
   assert.doesNotMatch(app, /window\.print\(\)/);

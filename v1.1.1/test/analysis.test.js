@@ -275,3 +275,15 @@ test("valuation history reports percentile and drawdown without calling it intri
   assert.equal(result.multiplePercentile, 0);
   assert.ok(Math.abs(result.drawdownFromHigh + 0.2) < 1e-12);
 });
+
+test("valuation history matches prices to the period-end year, not an offset fiscal label", () => {
+  const rows = [{ year: 2025, fiscalYear: 2025, periodEndYear: 2026, fcf: 10, shares: 10 }];
+  const history = [
+    { date: "2025-12-31", close: 7 },
+    { date: "2026-02-01", close: 12 }
+  ];
+  const result = computeValuationHistory(rows, history, { marketCap: 80, price: 8 }, {});
+  assert.equal(result.observations.length, 1);
+  assert.equal(result.observations[0].price, 12);
+  assert.equal(result.observations[0].year, 2025);
+});

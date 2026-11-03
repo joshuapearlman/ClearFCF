@@ -263,9 +263,18 @@ function instantFacts(concept) {
 function dedupeByYear(facts) {
   const years = new Map();
   for (const fact of facts) {
-    const year = Number(String(fact.end).slice(0, 4));
-    const current = years.get(year);
-    if (!current || String(fact.filed || "") > String(current.filed || "")) years.set(year, fact);
+    const periodEndYear = Number(String(fact.end).slice(0, 4));
+    if (!Number.isInteger(periodEndYear)) continue;
+    const reportedFiscalYear = Number(fact.fy);
+    const fiscalYearCandidate = Number.isInteger(reportedFiscalYear)
+      && reportedFiscalYear >= periodEndYear - 1
+      && reportedFiscalYear <= periodEndYear
+      ? reportedFiscalYear
+      : periodEndYear;
+    const current = years.get(periodEndYear);
+    const fiscalYear = Math.min(current?.fiscalYear ?? periodEndYear, fiscalYearCandidate);
+    const selected = !current || String(fact.filed || "") > String(current.filed || "") ? fact : current;
+    years.set(periodEndYear, { ...selected, fiscalYear, periodEndYear });
   }
   return years;
 }

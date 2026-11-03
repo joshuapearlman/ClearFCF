@@ -26,6 +26,48 @@ test("historical instant facts use period-end year instead of the filing fiscal-
   assert.equal(series.values.get(2025).val, 120);
 });
 
+test("annual rows display issuer fiscal years while retaining period-end alignment", () => {
+  const annual = (start, end, val, fy, filed) => ({ start, end, val, fy, filed, form: "10-K", fp: "FY" });
+  const facts = { facts: { "us-gaap": {
+    Revenues: {
+      label: "Revenue",
+      units: { USD: [
+        annual("2024-01-29", "2025-02-02", 10_588_126, 2024, "2025-03-20"),
+        annual("2024-01-29", "2025-02-02", 10_588_126, 2025, "2026-03-17"),
+        annual("2025-02-03", "2026-02-01", 11_102_600, 2025, "2026-03-17")
+      ] }
+    },
+    AssetsCurrent: {
+      label: "Current assets",
+      units: { USD: [
+        { end: "2025-02-02", val: 20, fy: 2025, filed: "2026-03-17", form: "10-K" },
+        { end: "2026-02-01", val: 25, fy: 2025, filed: "2026-03-17", form: "10-K" }
+      ] }
+    }
+  } } };
+
+  const extracted = extractFinancials(facts);
+  assert.equal(extracted.series.revenue.values.get(2026).fiscalYear, 2025);
+  assert.equal(extracted.series.revenue.values.get(2025).fiscalYear, 2024);
+  const rows = annualRows(extracted);
+  assert.deepEqual(rows.slice(0, 2).map((row) => [row.year, row.periodEndYear, row.periodEnd, row.revenue, row.currentAssets]), [
+    [2025, 2026, "2026-02-01", 11_102_600, 25],
+    [2024, 2025, "2025-02-02", 10_588_126, 20]
+  ]);
+});
+
+test("calendar-year issuers keep their existing fiscal-year labels", () => {
+  const facts = { facts: { "us-gaap": { Revenues: {
+    label: "Revenue",
+    units: { USD: [
+      { start: "2024-01-01", end: "2024-12-31", val: 90, fy: 2024, filed: "2025-02-01", form: "10-K", fp: "FY" },
+      { start: "2024-01-01", end: "2024-12-31", val: 90, fy: 2025, filed: "2026-02-01", form: "10-K", fp: "FY" },
+      { start: "2025-01-01", end: "2025-12-31", val: 100, fy: 2025, filed: "2026-02-01", form: "10-K", fp: "FY" }
+    ] }
+  } } } };
+  assert.deepEqual(annualRows(extractFinancials(facts)).slice(0, 2).map((row) => row.year), [2025, 2024]);
+});
+
 test("latest balance-sheet facts prefer the newest period across fallback tags", () => {
   const facts = { facts: { "us-gaap": {
     CashCashEquivalentsAndShortTermInvestments: {

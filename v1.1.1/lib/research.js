@@ -192,6 +192,7 @@ function buildResearchSnapshot(report) {
 
   const rows = Array.isArray(report.rows) ? report.rows.slice(0, 15).map((row) => ({
     year: row.year,
+    periodEnd: row.periodEnd || row.evidence?.revenue?.periodEnd || null,
     revenue: finiteOrNull(row.revenue),
     operatingCashFlow: finiteOrNull(row.ocf),
     capitalExpenditures: finiteOrNull(row.capex),

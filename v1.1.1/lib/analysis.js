@@ -46,8 +46,28 @@ function evidenceForYear(series, year) {
     form: fact.form || null,
     accession: fact.accn || null,
     periodEnd: fact.end || null,
+    fiscalYear: Number.isInteger(fact.fiscalYear) ? fact.fiscalYear : null,
     shareBasis: fact.shareBasis || null
   };
+}
+
+const ANNUAL_SERIES_KEYS = [
+  "revenue", "grossProfit", "operatingIncome", "pretaxIncome", "incomeTaxExpense", "netIncome",
+  "ocf", "capex", "intangibleCapex", "dna", "interestExpense", "sbc", "dilutedShares",
+  "buybackCash", "buybackShares", "dividendsPaid"
+];
+
+function fiscalPeriodIdentity(series, periodEndYear) {
+  for (const key of ANNUAL_SERIES_KEYS) {
+    const fact = series?.[key]?.values?.get(periodEndYear);
+    if (!fact) continue;
+    const fiscalYear = Number(fact.fiscalYear);
+    return {
+      fiscalYear: Number.isInteger(fiscalYear) ? fiscalYear : periodEndYear,
+      periodEnd: fact.end || null
+    };
+  }
+  return { fiscalYear: periodEndYear, periodEnd: null };
 }
 
 function annualRows(extracted) {
@@ -57,51 +77,52 @@ function annualRows(extracted) {
       for (const year of series.values.keys()) years.add(year);
     }
   }
-  const rows = [...years].sort((a, b) => b - a).slice(0, 10).map((year) => {
-    const revenue = valueForYear(extracted.series.revenue, year);
-    const grossProfit = valueForYear(extracted.series.grossProfit, year);
-    const ebit = valueForYear(extracted.series.operatingIncome, year);
-    const pretaxIncome = valueForYear(extracted.series.pretaxIncome, year);
-    const incomeTaxExpenseRaw = valueForYear(extracted.series.incomeTaxExpense, year);
+  const rows = [...years].sort((a, b) => b - a).slice(0, 10).map((periodEndYear) => {
+    const { fiscalYear: year, periodEnd } = fiscalPeriodIdentity(extracted.series, periodEndYear);
+    const revenue = valueForYear(extracted.series.revenue, periodEndYear);
+    const grossProfit = valueForYear(extracted.series.grossProfit, periodEndYear);
+    const ebit = valueForYear(extracted.series.operatingIncome, periodEndYear);
+    const pretaxIncome = valueForYear(extracted.series.pretaxIncome, periodEndYear);
+    const incomeTaxExpenseRaw = valueForYear(extracted.series.incomeTaxExpense, periodEndYear);
     const incomeTaxExpense = finite(incomeTaxExpenseRaw) ? Math.abs(incomeTaxExpenseRaw) : null;
-    const netIncome = valueForYear(extracted.series.netIncome, year);
-    const ocf = valueForYear(extracted.series.ocf, year);
-    const capexTangibleRaw = valueForYear(extracted.series.capex, year);
-    const capexIntangibleRaw = valueForYear(extracted.series.intangibleCapex, year);
+    const netIncome = valueForYear(extracted.series.netIncome, periodEndYear);
+    const ocf = valueForYear(extracted.series.ocf, periodEndYear);
+    const capexTangibleRaw = valueForYear(extracted.series.capex, periodEndYear);
+    const capexIntangibleRaw = valueForYear(extracted.series.intangibleCapex, periodEndYear);
     const capexTangible = finite(capexTangibleRaw) ? Math.abs(capexTangibleRaw) : null;
     const capexIntangible = finite(capexIntangibleRaw) ? Math.abs(capexIntangibleRaw) : null;
     const capex = finite(capexTangible) || finite(capexIntangible)
       ? (capexTangible || 0) + (capexIntangible || 0)
       : null;
 
-    const dna = valueForYear(extracted.series.dna, year);
-    const interest = valueForYear(extracted.series.interestExpense, year);
-    const sbc = valueForYear(extracted.series.sbc, year);
-    const shareFact = extracted.series.dilutedShares?.values?.get(year);
+    const dna = valueForYear(extracted.series.dna, periodEndYear);
+    const interest = valueForYear(extracted.series.interestExpense, periodEndYear);
+    const sbc = valueForYear(extracted.series.sbc, periodEndYear);
+    const shareFact = extracted.series.dilutedShares?.values?.get(periodEndYear);
     const shares = shareFact?.val ?? null;
     const shareBasis = shareFact?.shareBasis || (finite(shares) ? "weighted-average diluted" : null);
-    const buybackCashRaw = valueForYear(extracted.series.buybackCash, year);
-    const buybackSharesRaw = valueForYear(extracted.series.buybackShares, year);
+    const buybackCashRaw = valueForYear(extracted.series.buybackCash, periodEndYear);
+    const buybackSharesRaw = valueForYear(extracted.series.buybackShares, periodEndYear);
     const buybackCash = finite(buybackCashRaw) ? Math.abs(buybackCashRaw) : null;
     const buybackShares = finite(buybackSharesRaw) ? Math.abs(buybackSharesRaw) : null;
-    const dividendsPaidRaw = valueForYear(extracted.series.dividendsPaid, year);
+    const dividendsPaidRaw = valueForYear(extracted.series.dividendsPaid, periodEndYear);
     const dividendsPaid = finite(dividendsPaidRaw) ? Math.abs(dividendsPaidRaw) : null;
-    const currentAssets = valueForYear(extracted.series.currentAssets, year);
-    const currentLiabilities = valueForYear(extracted.series.currentLiabilities, year);
-    const accountsReceivable = valueForYear(extracted.series.accountsReceivable, year);
-    const inventory = valueForYear(extracted.series.inventory, year);
-    const prepaidExpenses = valueForYear(extracted.series.prepaidExpenses, year);
-    let accountsPayable = valueForYear(extracted.series.accountsPayable, year);
-    let accruedExpenses = valueForYear(extracted.series.accruedExpenses, year);
-    const accountsPayableTag = evidenceForYear(extracted.series.accountsPayable, year)?.tag;
-    const accruedExpensesTag = evidenceForYear(extracted.series.accruedExpenses, year)?.tag;
+    const currentAssets = valueForYear(extracted.series.currentAssets, periodEndYear);
+    const currentLiabilities = valueForYear(extracted.series.currentLiabilities, periodEndYear);
+    const accountsReceivable = valueForYear(extracted.series.accountsReceivable, periodEndYear);
+    const inventory = valueForYear(extracted.series.inventory, periodEndYear);
+    const prepaidExpenses = valueForYear(extracted.series.prepaidExpenses, periodEndYear);
+    let accountsPayable = valueForYear(extracted.series.accountsPayable, periodEndYear);
+    let accruedExpenses = valueForYear(extracted.series.accruedExpenses, periodEndYear);
+    const accountsPayableTag = evidenceForYear(extracted.series.accountsPayable, periodEndYear)?.tag;
+    const accruedExpensesTag = evidenceForYear(extracted.series.accruedExpenses, periodEndYear)?.tag;
     if (accountsPayableTag === "AccountsPayableAndOtherAccruedLiabilitiesCurrent" && finite(accountsPayable)) {
       accruedExpenses = null;
     } else if (accruedExpensesTag === "annualPayablesAndAccruedExpenses" && finite(accruedExpenses)) {
       accountsPayable = null;
     }
-    const historicalCash = valueForYear(extracted.series.historicalCash, year);
-    const historicalShortDebt = valueForYear(extracted.series.historicalShortDebt, year);
+    const historicalCash = valueForYear(extracted.series.historicalCash, periodEndYear);
+    const historicalShortDebt = valueForYear(extracted.series.historicalShortDebt, periodEndYear);
     const operatingCurrentAssets = [accountsReceivable, inventory, prepaidExpenses].some(finite)
       ? [accountsReceivable, inventory, prepaidExpenses].reduce((sum, value) => sum + (finite(value) ? value : 0), 0)
       : null;
@@ -119,7 +140,7 @@ function annualRows(extracted) {
     const fcfEconomic = finite(fcf) && finite(sbc) ? fcf - sbc : null;
 
     return {
-      year, revenue, grossProfit, ebit, pretaxIncome, incomeTaxExpense, effectiveTaxRate, netIncome,
+      year, fiscalYear: year, periodEndYear, periodEnd, revenue, grossProfit, ebit, pretaxIncome, incomeTaxExpense, effectiveTaxRate, netIncome,
       currentAssets, currentLiabilities, accountsReceivable, inventory, prepaidExpenses, accountsPayable, accruedExpenses,
       operatingCurrentAssets, operatingCurrentLiabilities, historicalCash, historicalShortDebt, netWorkingCapital,
       ocf, capex, capexTangible, capexIntangible, dna, interest, sbc, shares, shareBasis,
@@ -134,7 +155,7 @@ function annualRows(extracted) {
       sbcToRevenue: finite(sbc) && finite(revenue) && revenue > 0 ? sbc / revenue : null,
       sbcToFcf: finite(sbc) && finite(fcf) && fcf > 0 ? sbc / fcf : null,
       capexToDna: finite(capex) && finite(dna) && dna > 0 ? capex / dna : null,
-      evidence: Object.fromEntries(Object.entries(extracted.series).map(([key, series]) => [key, evidenceForYear(series, year)]))
+      evidence: Object.fromEntries(Object.entries(extracted.series).map(([key, series]) => [key, evidenceForYear(series, periodEndYear)]))
     };
   });
   for (let index = 0; index < rows.length; index += 1) {
@@ -588,7 +609,7 @@ function computeValuationHistory(rows, priceHistory, valuation, quote) {
   const observations = [];
   for (const row of rows) {
     if (!finite(row.fcf) || row.fcf <= 0 || !finite(row.shares) || row.shares <= 0) continue;
-    const prices = priceHistory.filter((item) => Number(item.date.slice(0, 4)) === row.year && finite(item.close));
+    const prices = priceHistory.filter((item) => Number(item.date.slice(0, 4)) === (row.periodEndYear || row.year) && finite(item.close));
     const price = prices.at(-1)?.close;
     if (!finite(price)) continue;
     observations.push({ year: row.year, price, priceToFcf: price * row.shares / row.fcf });
