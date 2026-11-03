@@ -174,7 +174,7 @@ function bridgeSourceMap(report) {
     debt: report.valuation?.debtSource || report.sources?.debt || "ClearFCF balance-sheet data",
     preferredStock: report.valuation?.preferredStockSource || report.sources?.preferredStock || "Not available — review before relying on the bridge",
     minorityInterest: report.valuation?.minorityInterestSource || report.sources?.minorityInterest || "Not available — review before relying on the bridge",
-    shares: report.valuation?.sharesSource || report.sources?.shares || "ClearFCF diluted-share data",
+    shares: report.valuation?.shareSource || report.sources?.shares || "ClearFCF diluted-share data",
     currentPrice: report.valuation?.priceSource || report.sources?.price || "Yahoo Finance market price"
   };
 }
@@ -191,37 +191,62 @@ function makeCase(name, report) {
   };
 }
 
+function currentBridge(report) {
+  return {
+    cash: number(report.valuation?.cash),
+    nonOperatingAssets: finite(report.valuation?.otherNonOperatingAssets) ? number(report.valuation.otherNonOperatingAssets) : null,
+    debt: number(report.valuation?.debt),
+    preferredStock: finite(report.valuation?.preferredStock) ? number(report.valuation.preferredStock) : null,
+    minorityInterest: finite(report.valuation?.minorityInterest) ? number(report.valuation.minorityInterest) : null,
+    shares: number(report.valuation?.shares),
+    currentPrice: number(report.valuation?.price)
+  };
+}
+
+function rehydrateWacc(report, storedWacc = {}) {
+  const fresh = defaultWacc(report);
+  const storedSources = storedWacc?.sources || {};
+  for (const key of Object.keys(fresh.sources)) {
+    if (storedSources[key] === "User input" && Object.hasOwn(storedWacc, key)) {
+      fresh[key] = storedWacc[key];
+      fresh.sources[key] = "User input";
+    }
+  }
+  fresh.mode = storedWacc?.mode === "manual" ? "manual" : "calculated";
+  return fresh;
+}
+
 function initializeModel(report) {
   const stored = loadStored(report.ticker);
-  if (stored) {
-    state.historicalYears = Math.min(10, Math.max(1, number(stored.historicalYears, 5)));
-    state.forecastYears = Math.min(10, Math.max(1, number(stored.forecastYears, 5)));
-    state.convention = stored.convention === "mid-year" ? "mid-year" : "year-end";
-    state.cases = stored.cases;
-    state.bridge = stored.bridge;
-    state.bridgeSources = stored.bridgeSources || {};
-    state.snapshots = Array.isArray(stored.snapshots) ? stored.snapshots : [];
-    for (const name of CASES) if (!state.cases?.[name]) state.cases[name] = makeCase(name, report);
-  } else {
-    state.cases = Object.fromEntries(CASES.map((name) => [name, makeCase(name, report)]));
-    state.bridge = {
-      cash: number(report.valuation?.cash),
-      nonOperatingAssets: finite(report.valuation?.otherNonOperatingAssets) ? number(report.valuation.otherNonOperatingAssets) : null,
-      debt: number(report.valuation?.debt),
-      preferredStock: finite(report.valuation?.preferredStock) ? number(report.valuation.preferredStock) : null,
-      minorityInterest: finite(report.valuation?.minorityInterest) ? number(report.valuation.minorityInterest) : null,
-      shares: number(report.valuation?.shares),
-      currentPrice: number(report.valuation?.price)
-    };
-    state.bridgeSources = bridgeSourceMap(report);
-    state.snapshots = [];
+  state.historicalYears = Math.min(10, Math.max(1, number(stored?.historicalYears, 5)));
+  state.forecastYears = Math.min(10, Math.max(1, number(stored?.forecastYears, 5)));
+  state.convention = stored?.convention === "mid-year" ? "mid-year" : "year-end";
+  state.snapshots = Array.isArray(stored?.snapshots) ? stored.snapshots : [];
+
+  state.bridge = currentBridge(report);
+  state.bridgeSources = bridgeSourceMap(report);
+  for (const key of Object.keys(state.bridge)) {
+    if (stored?.bridgeSources?.[key] === "User input" && Object.hasOwn(stored?.bridge || {}, key)) {
+      state.bridge[key] = stored.bridge[key];
+      state.bridgeSources[key] = "User input";
+    }
   }
-  state.bridgeSources = { ...bridgeSourceMap(report), ...state.bridgeSources };
+
+  state.cases = {};
   for (const name of CASES) {
-    state.cases[name].drivers = { ...defaultDrivers(), ...(state.cases[name].drivers || {}) };
-    if (state.cases[name].terminal?.exitMetric === "ebitda") state.cases[name].terminal.exitMetric = "ebit";
+    const defaults = makeCase(name, report);
+    const saved = stored?.cases?.[name] || {};
+    state.cases[name] = {
+      ...defaults,
+      drivers: { ...defaultDrivers(), ...(saved.drivers || {}) },
+      forecast: Array.isArray(saved.forecast) ? saved.forecast : [],
+      manualOverrides: saved.manualOverrides && typeof saved.manualOverrides === "object" ? saved.manualOverrides : {},
+      wacc: rehydrateWacc(report, saved.wacc),
+      terminal: { ...defaults.terminal, ...(saved.terminal || {}) }
+    };
+    if (state.cases[name].terminal.exitMetric === "ebitda") state.cases[name].terminal.exitMetric = "ebit";
+    rebuildCase(name);
   }
-  normalizeForecastLengths();
 }
 
 function loadStored(ticker) {
@@ -723,7 +748,14 @@ $("#ticker-form").addEventListener("submit", (event) => {
   loadTicker($("#ticker").value);
 });
 $("#refresh-sec").addEventListener("click", () => loadTicker(state.report?.ticker, true));
-$("#historical-years").addEventListener("change", (event) => { state.historicalYears = Number(event.target.value); updateAndRender(); });
+$("#historical-years").addEventListener("change", (event) => {
+  state.historicalYears = Number(event.target.value);
+  for (const name of CASES) {
+    state.cases[name].wacc = rehydrateWacc(state.report, state.cases[name].wacc);
+    rebuildCase(name);
+  }
+  updateAndRender();
+});
 $("#forecast-years").addEventListener("change", (event) => {
   state.forecastYears = Number(event.target.value);
   normalizeForecastLengths();

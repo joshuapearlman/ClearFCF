@@ -5,9 +5,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const analyze = require("./api/analyze");
+const research = require("./api/research");
 const screen = require("./api/screen");
 const universe = require("./api/universe");
-const research = require("./lib/research-api");
+const { readJsonBody } = require("./lib/http");
 
 function resolvePublicDir() {
   const candidates = [
@@ -59,15 +60,13 @@ http.createServer(async (req, rawRes) => {
   if (handler) {
     req.query = Object.fromEntries(url.searchParams);
     if (req.method === "POST") {
-      let body = "";
-      for await (const chunk of req) body += chunk;
-      try { req.body = body ? JSON.parse(body) : {}; }
-      catch { return responseAdapter(rawRes).status(400).json({ error: "Invalid JSON." }); }
+      try { req.body = await readJsonBody(req); }
+      catch (error) { return responseAdapter(rawRes).status(error.statusCode || 400).json({ error: error.message }); }
     }
     return handler(req, responseAdapter(rawRes));
   }
 
-    const names = {
+  const names = {
     "/": "index.html",
     "/app.js": "app.js",
     "/screening.js": "screening.js",
@@ -113,6 +112,6 @@ http.createServer(async (req, rawRes) => {
     rawRes.end("Internal error loading asset");
   });
   stream.pipe(rawRes);
-}).listen(process.env.PORT || 3000, () => {
-  console.log(`Clear FCF Screener running at http://localhost:${process.env.PORT || 3000}`);
+}).listen(process.env.PORT || 3000, "127.0.0.1", () => {
+  console.log(`Clear FCF Screener running at http://127.0.0.1:${process.env.PORT || 3000}`);
 });

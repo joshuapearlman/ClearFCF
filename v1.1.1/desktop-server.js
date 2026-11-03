@@ -8,6 +8,7 @@ const analyze = require("./api/analyze");
 const screen = require("./api/screen");
 const universe = require("./api/universe");
 const research = require("./lib/research-api");
+const { isTrustedLocalRequest, readJsonBody } = require("./lib/http");
 
 function resolvePublicDir() {
   const candidates = [
@@ -58,12 +59,13 @@ function createAppServer() {
     const url = new URL(req.url, "http://localhost");
     const handler = handlers[url.pathname];
     if (handler) {
+      if (req.method === "POST" && !isTrustedLocalRequest(req)) {
+        return responseAdapter(rawRes).status(403).json({ error: "Cross-origin local requests are not allowed." });
+      }
       req.query = Object.fromEntries(url.searchParams);
       if (req.method === "POST") {
-        let body = "";
-        for await (const chunk of req) body += chunk;
-        try { req.body = body ? JSON.parse(body) : {}; }
-        catch { return responseAdapter(rawRes).status(400).json({ error: "Invalid JSON." }); }
+        try { req.body = await readJsonBody(req); }
+        catch (error) { return responseAdapter(rawRes).status(error.statusCode || 400).json({ error: error.message }); }
       }
       return handler(req, responseAdapter(rawRes));
     }

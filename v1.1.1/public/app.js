@@ -28,6 +28,7 @@ const PRESETS = {
     enforceSolvency: true,
     excludeFinancials: true,
     requireCompleteData: true,
+    requireMarginAgreement: true,
     lookbackYears: "all"
   },
   compounder: {
@@ -44,6 +45,7 @@ const PRESETS = {
     enforceSolvency: false,
     excludeFinancials: true,
     requireCompleteData: true,
+    requireMarginAgreement: true,
     lookbackYears: "all"
   },
   "deep-value": {
@@ -60,6 +62,7 @@ const PRESETS = {
     enforceSolvency: true,
     excludeFinancials: true,
     requireCompleteData: true,
+    requireMarginAgreement: true,
     lookbackYears: "all"
   }
 };
@@ -1689,7 +1692,11 @@ async function ensureResearchAuthentication(ticker) {
   if (!status.available) throw new Error(status.message || "Codex is unavailable in this ClearFCF installation.");
   if (status.authenticated) return;
 
-  const login = await request("/api/research?action=login", { method: "POST" });
+  const login = await request("/api/research?action=login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}"
+  });
   state.researchJobs[ticker] = {
     status: "signing-in",
     message: "Waiting for ChatGPT sign-in…",

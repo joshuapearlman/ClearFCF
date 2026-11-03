@@ -505,6 +505,7 @@ class CodexResearchService {
     try {
       this.update(job, { status: "authenticating", message: "Checking ChatGPT connection…", progress: 6 });
       const auth = await this.status();
+      if (job.status === "cancelled") return;
       if (!auth.authenticated) {
         const error = new Error(auth.message || "Codex sign-in is required.");
         error.code = "AUTH_REQUIRED";
@@ -512,9 +513,11 @@ class CodexResearchService {
       }
 
       tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "clearfcf-research-"));
+      if (job.status === "cancelled") return;
       const schemaPath = path.join(tempDir, "research.schema.json");
       const outputPath = path.join(tempDir, "research.result.json");
       await fsp.writeFile(schemaPath, JSON.stringify(RESEARCH_SCHEMA, null, 2), "utf8");
+      if (job.status === "cancelled") return;
       const prompt = buildResearchPrompt(snapshot);
       this.update(job, { status: "researching", message: "Researching filings, company developments, and market concerns…", progress: 14 });
 
@@ -523,6 +526,7 @@ class CodexResearchService {
         "--model", job.model, "--config", `model_reasoning_effort=${JSON.stringify(job.effort)}`,
         "--skip-git-repo-check", "-C", this.workspaceRoot, "--output-schema", schemaPath, "-o", outputPath, "-"
       ];
+      if (job.status === "cancelled") return;
       const result = await this.run(args, {
         input: prompt,
         timeoutMs: 20 * 60 * 1000,
@@ -546,11 +550,14 @@ class CodexResearchService {
         }
       });
       this.active.delete(job.id);
+      if (job.status === "cancelled") return;
       if (result.code !== 0) throw new Error(result.stderr.trim() || `Codex exited with code ${result.code}.`);
 
       const stat = await fsp.stat(outputPath);
+      if (job.status === "cancelled") return;
       if (stat.size > MAX_RESULT_BYTES) throw new Error("The research report exceeded the safe size limit.");
       const parsed = JSON.parse(await fsp.readFile(outputPath, "utf8"));
+      if (job.status === "cancelled") return;
       const validated = validateResearchResult(parsed, snapshot.ticker);
       const completedAt = new Date().toISOString();
       this.update(job, {

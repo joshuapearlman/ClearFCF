@@ -91,8 +91,15 @@ function annualRows(extracted) {
     const accountsReceivable = valueForYear(extracted.series.accountsReceivable, year);
     const inventory = valueForYear(extracted.series.inventory, year);
     const prepaidExpenses = valueForYear(extracted.series.prepaidExpenses, year);
-    const accountsPayable = valueForYear(extracted.series.accountsPayable, year);
-    const accruedExpenses = valueForYear(extracted.series.accruedExpenses, year);
+    let accountsPayable = valueForYear(extracted.series.accountsPayable, year);
+    let accruedExpenses = valueForYear(extracted.series.accruedExpenses, year);
+    const accountsPayableTag = evidenceForYear(extracted.series.accountsPayable, year)?.tag;
+    const accruedExpensesTag = evidenceForYear(extracted.series.accruedExpenses, year)?.tag;
+    if (accountsPayableTag === "AccountsPayableAndOtherAccruedLiabilitiesCurrent" && finite(accountsPayable)) {
+      accruedExpenses = null;
+    } else if (accruedExpensesTag === "annualPayablesAndAccruedExpenses" && finite(accruedExpenses)) {
+      accountsPayable = null;
+    }
     const historicalCash = valueForYear(extracted.series.historicalCash, year);
     const historicalShortDebt = valueForYear(extracted.series.historicalShortDebt, year);
     const operatingCurrentAssets = [accountsReceivable, inventory, prepaidExpenses].some(finite)

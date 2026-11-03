@@ -388,13 +388,14 @@ function bestHistoricalShareSeries(facts) {
 }
 
 function latestInstant(facts, tags) {
-  for (const tag of tags) {
-    const candidates = allConcepts(facts, tag).flatMap(({ concept, taxonomy }) =>
-      instantFacts(concept).map((fact) => ({ ...fact, taxonomy, tag, label: concept.label || tag }))
-    ).sort((a, b) => String(b.end).localeCompare(String(a.end)) || String(b.filed).localeCompare(String(a.filed)));
-    if (candidates.length) return candidates[0];
-  }
-  return null;
+  const priority = new Map(tags.map((tag, index) => [tag, index]));
+  return tags.flatMap((tag) => allConcepts(facts, tag).flatMap(({ concept, taxonomy }) =>
+    instantFacts(concept).map((fact) => ({ ...fact, taxonomy, tag, label: concept.label || tag }))
+  )).sort((a, b) =>
+    String(b.end || "").localeCompare(String(a.end || ""))
+      || String(b.filed || "").localeCompare(String(a.filed || ""))
+      || (priority.get(a.tag) ?? Infinity) - (priority.get(b.tag) ?? Infinity)
+  )[0] || null;
 }
 
 function extractFinancials(facts) {

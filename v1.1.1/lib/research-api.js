@@ -15,9 +15,15 @@ async function handler(req, res) {
       return res.status(200).json(await service.status(req.query?.force === "1"));
     }
     if (req.method === "POST" && action === "login") {
+      if (!String(req.headers?.["content-type"] || "").toLowerCase().startsWith("application/json")) {
+        return res.status(415).json({ error: "Use application/json for local research actions." });
+      }
       return res.status(202).json(await service.login());
     }
     if (req.method === "POST" && action === "start") {
+      if (!String(req.headers?.["content-type"] || "").toLowerCase().startsWith("application/json")) {
+        return res.status(415).json({ error: "Use application/json for local research actions." });
+      }
       return res.status(202).json(service.start(req.body?.report, {
         model: req.body?.model,
         effort: req.body?.effort
@@ -28,6 +34,9 @@ async function handler(req, res) {
       return job ? res.status(200).json(job) : res.status(404).json({ error: "Research job not found." });
     }
     if (req.method === "POST" && action === "cancel") {
+      if (!String(req.headers?.["content-type"] || "").toLowerCase().startsWith("application/json")) {
+        return res.status(415).json({ error: "Use application/json for local research actions." });
+      }
       const job = service.cancel(String(req.body?.id || ""));
       return job ? res.status(200).json(job) : res.status(404).json({ error: "Research job not found." });
     }

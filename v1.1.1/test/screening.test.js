@@ -35,6 +35,15 @@ test("missing valuation-critical evidence cannot qualify automatically", () => {
   assert.ok(result.reasons.some((reason) => reason.startsWith("Missing:") && reason.includes("SBC")));
 });
 
+test("normalized margin disagreement blocks qualification unless explicitly disabled", () => {
+  const report = completeReport();
+  report.normalized.marginAgreement = false;
+  const required = evaluateCandidate(report, {});
+  assert.equal(required.status, "Review");
+  assert.ok(required.failures.includes("Normalized margins do not agree"));
+  assert.equal(evaluateCandidate(report, { requireMarginAgreement: false }).status, "Idea");
+});
+
 test("screen uses normalized recent SBC burden instead of one depressed annual ratio", () => {
   const report = completeReport();
   report.quality.latestSbcToFcf = 5.8;

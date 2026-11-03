@@ -104,3 +104,20 @@ test("research model and effort choices are validated and attached to jobs", () 
   assert.equal(job.model, "gpt-5.5");
   assert.equal(job.effort, "medium");
 });
+
+test("cancelling during authentication prevents a research process from starting", async () => {
+  const service = new CodexResearchService();
+  let releaseStatus;
+  let runCount = 0;
+  service.status = () => new Promise((resolve) => { releaseStatus = resolve; });
+  service.run = async () => { runCount += 1; return { code: 1, stdout: "", stderr: "should not run" }; };
+
+  const started = service.start(sampleReport());
+  const cancelled = service.cancel(started.id);
+  assert.equal(cancelled.status, "cancelled");
+  releaseStatus({ available: true, authenticated: true, message: "Connected" });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(runCount, 0);
+  assert.equal(service.get(started.id).status, "cancelled");
+});

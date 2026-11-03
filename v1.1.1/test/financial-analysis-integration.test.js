@@ -34,6 +34,11 @@ test("Financial Deep Analysis is served by the main ClearFCF application", () =>
   assert.match(financialApp, /nwcMethod/);
   assert.match(financialApp, /apply-ratio-method/);
   assert.match(financialApp, /percentagePointChange/);
+  assert.match(financialApp, /report\.valuation\?\.shareSource/);
+  assert.doesNotMatch(financialApp, /report\.valuation\?\.sharesSource/);
+  assert.match(financialApp, /stored\?\.bridgeSources\?\.\[key\] === "User input"/);
+  assert.match(financialApp, /rehydrateWacc\(report, saved\.wacc\)/);
+  assert.match(financialApp, /rebuildCase\(name\)/);
   const collapsibleSections = [...financialIndex.matchAll(/data-collapse-id="([^"]+)" data-collapse-targets="([^"]+)"/g)];
   assert.equal(collapsibleSections.length, 14);
   for (const [, id, selectors] of collapsibleSections) {
@@ -55,6 +60,11 @@ test("Financial Deep Analysis is served by the main ClearFCF application", () =>
     assert.match(source, /"\/financial-analysis\/app\.js": "app\.js"/);
     assert.match(source, /"\/financial-analysis\/engine\.js": "engine\.js"/);
   }
+  assert.match(server, /require\("\.\/api\/research"\)/);
+  assert.doesNotMatch(server, /require\("\.\/lib\/research-api"\)/);
+  assert.match(server, /\.listen\([^\n]+"127\.0\.0\.1"/);
+  assert.match(desktopServer, /isTrustedLocalRequest\(req\)/);
+  assert.match(desktopServer, /readJsonBody\(req\)/);
   assert.ok(packageJson.build.files.includes("public/**/*"));
   assert.match(electronMain, /parsed\.pathname === "\/financial-analysis"/);
   assert.match(electronMain, /action: "allow"/);

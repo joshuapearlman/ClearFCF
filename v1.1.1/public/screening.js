@@ -194,7 +194,7 @@
     }
 
     const marginAgreement = row?.marginAgreement ?? row?.normalized?.marginAgreement;
-    if (criteria.requireMarginAgreement === true && marginAgreement !== true) fail.push("Normalized margins do not agree");
+    if (criteria.requireMarginAgreement !== false && marginAgreement !== true) fail.push("Normalized margins do not agree");
 
     const requireComplete = criteria.requireCompleteData !== false;
     const status = excluded.length ? "Excluded" : fail.length || (requireComplete && unknown.length) ? "Review" : "Idea";

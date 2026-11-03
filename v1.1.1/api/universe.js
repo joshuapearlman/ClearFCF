@@ -2,7 +2,7 @@
 
 const { fetchYahooUniverse, SOURCES } = require("../lib/yahoo");
 const { fetchSecUniverse } = require("../lib/sec");
-const { SP500, MIDCAP, SMALLCAP } = require("../lib/indices");
+const { fetchIndexUniverse } = require("../lib/indices");
 const { setCacheHeaders } = require("../lib/utils");
 
 module.exports = async function handler(req, res) {
@@ -10,22 +10,10 @@ module.exports = async function handler(req, res) {
   try {
     const type = String(req.query?.type || "yahoo").toLowerCase();
 
-    if (type === "sp500") {
-      const symbols = SP500.map((ticker) => ({ ticker, name: ticker, source: "S&P 500" }));
+    if (["sp500", "midcap", "smallcap"].includes(type)) {
+      const universe = await fetchIndexUniverse(type);
       setCacheHeaders(res, 3600);
-      return res.status(200).json({ symbols, sources: [{ id: "sp500", title: "S&P 500 (Large Cap)", count: symbols.length }], fetchedAt: new Date().toISOString() });
-    }
-
-    if (type === "midcap") {
-      const symbols = MIDCAP.map((ticker) => ({ ticker, name: ticker, source: "S&P 400 MidCap" }));
-      setCacheHeaders(res, 3600);
-      return res.status(200).json({ symbols, sources: [{ id: "midcap", title: "S&P 400 MidCap", count: symbols.length }], fetchedAt: new Date().toISOString() });
-    }
-
-    if (type === "smallcap") {
-      const symbols = SMALLCAP.map((ticker) => ({ ticker, name: ticker, source: "Small-Cap Index" }));
-      setCacheHeaders(res, 3600);
-      return res.status(200).json({ symbols, sources: [{ id: "smallcap", title: "Small-Cap Universe", count: symbols.length }], fetchedAt: new Date().toISOString() });
+      return res.status(200).json(universe);
     }
 
     if (type === "sec_all") {

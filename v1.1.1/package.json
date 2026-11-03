@@ -18,11 +18,11 @@
   },
   "dependencies": {
     "@openai/codex": "^0.147.0",
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.11"
   },
   "devDependencies": {
-    "electron": "^32.3.3",
-    "electron-builder": "^25.1.8"
+    "electron": "^45.2.1",
+    "electron-builder": "^26.18.0"
   },
   "build": {
     "appId": "com.clearfcf.screener",

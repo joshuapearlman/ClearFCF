@@ -239,6 +239,11 @@ async function fetchYahooQuote(ticker) {
 
 const FUNDAMENTAL_TYPES = [
   "annualTotalRevenue",
+  "annualGrossProfit",
+  "annualOperatingIncome",
+  "annualPretaxIncome",
+  "annualTaxProvision",
+  "annualNetIncome",
   "annualOperatingCashFlow",
   "annualCapitalExpenditure",
   "annualPurchaseOfIntangibles",
@@ -365,7 +370,7 @@ async function fetchYahooFinancials(ticker) {
     inventory: yahooSeries(byType, "annualInventory"),
     prepaidExpenses: firstYahooSeries(byType, ["annualPrepaidAssets", "annualOtherCurrentAssets"]),
     accountsPayable: firstYahooSeries(byType, ["annualAccountsPayable", "annualPayables"]),
-    accruedExpenses: firstYahooSeries(byType, ["annualCurrentAccruedExpenses", "annualPayablesAndAccruedExpenses"])
+    accruedExpenses: yahooSeries(byType, "annualCurrentAccruedExpenses")
   };
   const cash = latestYahooFact(byType, ["quarterlyCashCashEquivalentsAndShortTermInvestments", "quarterlyCashAndCashEquivalents"]);
   const totalDebt = latestYahooFact(byType, ["quarterlyTotalDebt"]);
@@ -463,4 +468,4 @@ async function fetchYahooPriceHistory(ticker) {
   })).filter((item) => finite(item.close));
 }
 
-module.exports = { SOURCES, fetchYahooQuote, fetchYahooFinancials, fetchYahooUniverse, fetchExchangeRate, fetchYahooPriceHistory };
+module.exports = { FUNDAMENTAL_TYPES, SOURCES, fetchYahooQuote, fetchYahooFinancials, fetchYahooUniverse, fetchExchangeRate, fetchYahooPriceHistory };
