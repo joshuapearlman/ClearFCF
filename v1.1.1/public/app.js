@@ -574,10 +574,11 @@ function exportCsv(results) {
 }
 
 function rowTable(rows) {
+  const yearHeading = rows.length && rows.every((row) => row.fiscalYearSource === "SEC filing") ? "Fiscal year" : "Period-end year";
   return `<div class="table-scroll"><table><thead><tr>
-    <th>Fiscal year</th><th>Revenue</th><th>OCF</th><th>CapEx</th><th>Standard FCF</th><th>SBC</th><th>Economic FCF</th><th>D&A</th><th>Share count</th>
+    <th>${yearHeading}</th><th>Revenue</th><th>OCF</th><th>CapEx</th><th>Standard FCF</th><th>SBC</th><th>Economic FCF</th><th>D&A</th><th>Share count</th>
   </tr></thead><tbody>${rows.map((row) => `<tr>
-    <td title="${escapeHtml([row.periodEnd && `Fiscal ${row.year}, period ended ${row.periodEnd}`, ...Object.entries(row.evidence || {}).filter(([, fact]) => fact?.tag).map(([key, fact]) => `${key}: ${fact.taxonomy}:${fact.tag} (${fact.form || "filing"}, filed ${fact.filed || "unknown"})`)].filter(Boolean).join("\n"))}"><strong>${row.year}</strong></td>
+    <td title="${escapeHtml([row.periodEnd && (row.fiscalYearSource === "SEC filing" ? `Fiscal ${row.year}, period ended ${row.periodEnd}` : `Period ended ${row.periodEnd}`), ...Object.entries(row.evidence || {}).filter(([, fact]) => fact?.tag).map(([key, fact]) => `${key}: ${fact.taxonomy}:${fact.tag} (${fact.form || "filing"}, filed ${fact.filed || "unknown"})`)].filter(Boolean).join("\n"))}"><strong>${row.year}</strong></td>
     <td>${compact(row.revenue, true)}</td>
     <td>${compact(row.ocf, true)}</td>
     <td>${compact(row.capex, true)}</td>

@@ -64,10 +64,11 @@ function fiscalPeriodIdentity(series, periodEndYear) {
     const fiscalYear = Number(fact.fiscalYear);
     return {
       fiscalYear: Number.isInteger(fiscalYear) ? fiscalYear : periodEndYear,
+      fiscalYearSource: fact.fiscalYearReported === true ? "SEC filing" : "period end",
       periodEnd: fact.end || null
     };
   }
-  return { fiscalYear: periodEndYear, periodEnd: null };
+  return { fiscalYear: periodEndYear, fiscalYearSource: "period end", periodEnd: null };
 }
 
 function annualRows(extracted) {
@@ -78,7 +79,7 @@ function annualRows(extracted) {
     }
   }
   const rows = [...years].sort((a, b) => b - a).slice(0, 10).map((periodEndYear) => {
-    const { fiscalYear: year, periodEnd } = fiscalPeriodIdentity(extracted.series, periodEndYear);
+    const { fiscalYear: year, fiscalYearSource, periodEnd } = fiscalPeriodIdentity(extracted.series, periodEndYear);
     const revenue = valueForYear(extracted.series.revenue, periodEndYear);
     const grossProfit = valueForYear(extracted.series.grossProfit, periodEndYear);
     const ebit = valueForYear(extracted.series.operatingIncome, periodEndYear);
@@ -140,7 +141,7 @@ function annualRows(extracted) {
     const fcfEconomic = finite(fcf) && finite(sbc) ? fcf - sbc : null;
 
     return {
-      year, fiscalYear: year, periodEndYear, periodEnd, revenue, grossProfit, ebit, pretaxIncome, incomeTaxExpense, effectiveTaxRate, netIncome,
+      year, fiscalYear: year, fiscalYearSource, periodEndYear, periodEnd, revenue, grossProfit, ebit, pretaxIncome, incomeTaxExpense, effectiveTaxRate, netIncome,
       currentAssets, currentLiabilities, accountsReceivable, inventory, prepaidExpenses, accountsPayable, accruedExpenses,
       operatingCurrentAssets, operatingCurrentLiabilities, historicalCash, historicalShortDebt, netWorkingCapital,
       ocf, capex, capexTangible, capexIntangible, dna, interest, sbc, shares, shareBasis,

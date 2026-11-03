@@ -50,6 +50,7 @@ test("annual rows display issuer fiscal years while retaining period-end alignme
   assert.equal(extracted.series.revenue.values.get(2026).fiscalYear, 2025);
   assert.equal(extracted.series.revenue.values.get(2025).fiscalYear, 2024);
   const rows = annualRows(extracted);
+  assert.equal(rows[0].fiscalYearSource, "SEC filing");
   assert.deepEqual(rows.slice(0, 2).map((row) => [row.year, row.periodEndYear, row.periodEnd, row.revenue, row.currentAssets]), [
     [2025, 2026, "2026-02-01", 11_102_600, 25],
     [2024, 2025, "2025-02-02", 10_588_126, 20]
@@ -66,6 +67,13 @@ test("calendar-year issuers keep their existing fiscal-year labels", () => {
     ] }
   } } } };
   assert.deepEqual(annualRows(extractFinancials(facts)).slice(0, 2).map((row) => row.year), [2025, 2024]);
+});
+
+test("annual data without an SEC fiscal-year label is identified as period-end based", () => {
+  const series = { values: new Map([[2026, { val: 100, end: "2026-02-01" }]]) };
+  const row = annualRows({ series: { revenue: series } })[0];
+  assert.equal(row.year, 2026);
+  assert.equal(row.fiscalYearSource, "period end");
 });
 
 test("latest balance-sheet facts prefer the newest period across fallback tags", () => {
