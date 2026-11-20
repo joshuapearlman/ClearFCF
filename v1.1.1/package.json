@@ -12,13 +12,11 @@
     "start": "node server.js",
     "dcf": "node dcf-server.js",
     "app": "electron electron-main.js",
-    "build:mac": "node scripts/check-mac-deps.cjs && electron-builder --mac --arm64 --x64",
-    "publish:mac": "node scripts/check-mac-deps.cjs && electron-builder --mac --arm64 --x64 --publish always -c.forceCodeSigning=true -c.mac.notarize=true",
+    "build:mac": "node scripts/check-mac-deps.cjs && electron-builder --mac dmg --arm64 --x64 --publish never",
     "dist": "electron-builder"
   },
   "dependencies": {
-    "@openai/codex": "^0.147.0",
-    "electron-updater": "^6.8.11"
+    "@openai/codex": "^0.147.0"
   },
   "devDependencies": {
     "electron": "^45.2.1",
@@ -32,17 +30,8 @@
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "target": [
-        "dmg",
-        "zip"
-      ],
+      "target": ["dmg"],
       "icon": "public/icon-mark.png"
-    },
-    "publish": {
-      "provider": "github",
-      "owner": "joshuapearlman",
-      "repo": "ClearFCF",
-      "releaseType": "draft"
     },
     "files": [
       "api/**/*",

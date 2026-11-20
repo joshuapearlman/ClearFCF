@@ -41,7 +41,9 @@ Scans and watchlists use local IndexedDB where available, with local-storage fal
 
 International exchange screening remains a gated future pilot. The current SEC-based qualification pipeline covers U.S. equities. The [product roadmap](../docs/clearfcf-app-audit-and-roadmap.md#ambitious-future-features) defines the evidence, source-rights, currency, and exchange-calendar checks required before another market can appear in the Idea Finder.
 
-Use Node 22 to create local Apple Silicon and Intel Mac packages. Add the following temporary block to `pnpm-workspace.yaml` so pnpm installs both native Codex executables:
+## Private Mac build
+
+The Mac app is built for local use. It is not uploaded to GitHub Releases or distributed by the build command. Use Node 22 to create Apple Silicon and Intel DMGs. Add the following temporary block to `pnpm-workspace.yaml` so pnpm installs both native Codex executables:
 
 ```yaml
 supportedArchitectures:
@@ -59,27 +61,9 @@ pnpm install --frozen-lockfile
 pnpm build:mac
 ```
 
-The DMG and ZIP packages are written to `dist`. Remove the temporary `supportedArchitectures` block after building; the release workflow adds it automatically. A local build without a Developer ID certificate is an unsigned test build. Do not distribute it as the public Mac release.
+The two DMGs are written to `dist`. Remove the temporary `supportedArchitectures` block after building so ordinary web installs keep their smaller dependency set. No Apple Developer account is required for a build used only on your own Mac. The package is unsigned, so macOS may require you to approve it when opening it from a downloaded or copied DMG.
 
-## Automatic Mac app synchronization
-
-Packaged Mac builds check GitHub Releases for updates after launch and download newer versions automatically. When an update finishes downloading, ClearFCF prompts to restart and install it.
-
-To publish the 1.2.0 Mac release, configure these GitHub Actions secrets first:
-
-- `MAC_CSC_LINK`: base64-encoded Developer ID Application `.p12` certificate
-- `MAC_CSC_KEY_PASSWORD`: certificate password
-- `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`, and `APPLE_TEAM_ID`: App Store Connect API key credentials for notarization (recommended), or `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`
-
-After the source and release notes are committed to `main`, push the matching version tag:
-
-```sh
-pnpm test
-git tag v1.2.0
-git push origin v1.2.0
-```
-
-The `.github/workflows/mac-release.yml` workflow requires the matching tag and signing credentials, runs tests, builds Apple Silicon and Intel packages, signs and notarizes them, verifies the app bundles, and then publishes the draft GitHub release with updater metadata. A missing credential or failed verification keeps the release unpublished. Set `CLEARFCF_DISABLE_UPDATES=1` before launching the app to skip update checks during local packaged-build testing.
+The packaged app uses one stable local address, so its saved scans, watchlists, and models remain available after a restart or a manual app update. It does not check GitHub for updates. To update it, build a new DMG and replace the app; export a workspace backup first if you want a separate copy of your research.
 
 ## What it includes
 - **Selectable Screening Universes**: live, validated S&P 500 (Large Cap), S&P 400 (Mid Cap), and S&P 600 (Small Cap) constituent tables; Full SEC Operating Universe (~4,000+); or Yahoo Discovery lists
