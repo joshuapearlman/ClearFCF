@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { evaluateCandidate, selectedMetrics, marketDataFreshness } = require("../public/screening");
+const { evaluateCandidate, selectedMetrics, marketDataFreshness, isMarketSession, latestExpectedSession } = require("../public/screening");
 
 function completeReport() {
   return {
@@ -13,7 +13,7 @@ function completeReport() {
     normalized5y: { normalizedFcf: 80e6, normalizedEconomicFcf: 70e6, averageInterest: 4e6 },
     normalized3y: { normalizedFcf: 50e6, normalizedEconomicFcf: 40e6, averageInterest: 3e6 },
     quality: { latestSbcToFcf: 0.10, normalizedSbcToFcf: 0.10, shareChange: 0, shareChangeYears: 8, shareChangeAnnualized: 0, positiveFcfRatio: 1 },
-    valuation: { marketCap: 900e6, enterpriseValue: 950e6, netDebt: 50e6, debt: 100e6, shortDebt: 0, cash: 50e6, shares: 100e6 }
+    valuation: { price: 9, marketCap: 900e6, enterpriseValue: 950e6, netDebt: 50e6, debt: 100e6, shortDebt: 0, cash: 50e6, shares: 100e6 }
   };
 }
 
@@ -77,6 +77,35 @@ test("quote freshness allows the prior trading session and gates older quotes", 
   assert.equal(marketDataFreshness("2026-10-26T20:00:00Z", tuesdayMorning), "fresh");
   assert.equal(marketDataFreshness("2026-10-23T20:00:00Z", tuesdayMorning), "stale");
   assert.equal(marketDataFreshness(null, tuesdayMorning), "missing");
+});
+
+test("market freshness respects a Monday holiday before Tuesday trading", () => {
+  const tuesdayMorning = "2026-09-08T12:00:00Z";
+  assert.equal(isMarketSession("2026-09-07"), false);
+  assert.equal(latestExpectedSession(tuesdayMorning), "2026-09-04");
+  assert.equal(marketDataFreshness("2026-09-04T20:00:00Z", tuesdayMorning), "fresh");
+  assert.equal(marketDataFreshness("2026-09-03T20:00:00Z", tuesdayMorning), "stale");
+});
+
+test("market freshness advances after an early close", () => {
+  const beforeClose = "2026-11-27T17:00:00Z";
+  const afterClose = "2026-11-27T19:00:00Z";
+  assert.equal(latestExpectedSession(beforeClose), "2026-11-25");
+  assert.equal(latestExpectedSession(afterClose), "2026-11-27");
+  assert.equal(marketDataFreshness("2026-11-25T21:00:00Z", beforeClose), "delayed");
+  assert.equal(marketDataFreshness("2026-11-25T21:00:00Z", afterClose), "stale");
+});
+
+test("exceptional market closures can be supplied by a calendar", () => {
+  const calendar = { closedDates: new Set(["2026-10-26"]) };
+  assert.equal(latestExpectedSession("2026-10-27T12:00:00Z", calendar), "2026-10-23");
+  assert.equal(marketDataFreshness("2026-10-23T20:00:00Z", "2026-10-27T12:00:00Z", calendar), "fresh");
+});
+
+test("an intraday lag is delayed, and a prior session quote becomes stale after the close", () => {
+  assert.equal(marketDataFreshness("2026-10-27T14:00:00Z", "2026-10-27T14:30:00Z"), "delayed");
+  assert.equal(marketDataFreshness("2026-10-26T20:00:00Z", "2026-10-27T14:30:00Z"), "delayed");
+  assert.equal(marketDataFreshness("2026-10-26T20:00:00Z", "2026-10-27T21:00:00Z"), "stale");
 });
 
 test("missing or stale market data cannot appear as an Idea", () => {

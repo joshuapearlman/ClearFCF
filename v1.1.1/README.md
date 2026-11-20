@@ -1,6 +1,6 @@
 # Clear FCF Screener
 
-**Current application version: 1.1.3**
+**Next application version: 1.2.0**
 
 A from-scratch, Vercel-ready normalized free-cash-flow idea screener. Multiple market universes (S&P 500, S&P 400 MidCap, S&P 600 SmallCap, Full SEC Directory, Yahoo Discovery) generate candidates; official SEC Company Facts provide six to ten years of annual financial evidence.
 
@@ -31,33 +31,60 @@ Open a company report, select **Deep Analysis**, then choose **Financial Deep An
 
 It includes SEC-sourced historical changes and margins; collapsible analysis sections with remembered display preferences; latest-year, 3-year average, 5-year average, median, fade-to-target, and manual forecast methods for D&A, CapEx, and operating-NWC components; explicit revenue-growth and EBIT-margin methods; walk-forward backtesting; editable Bear/Base/Bull forecasts; an EBIT-based FCFF DCF; calculated or manual WACC; perpetuity-growth and exit-multiple terminal values; sensitivity analysis; earnings-quality and capital-allocation diagnostics; consistency checks; and locally saved forecast snapshots.
 
-To create a distributable Apple-silicon Mac build:
+WACC starting rates now show editable as-of dates. Mark the active case's assumptions reviewed before saving a forecast snapshot or exporting a valuation. **Use rates as my defaults** applies the reviewed risk-free rate and equity risk premium to new models. **Export model JSON** includes all cases, source dates, and the equity bridge. **Save valuation PDF** opens the browser print dialog with a compact valuation report.
+
+## Saved research workspace
+
+The **Watchlist** view supports named lists of up to 200 tickers, per-company review status, thesis and risk notes, and last-reviewed dates. **Rescreen list** saves the latest result and shows changes in price, normalized FCF multiple, decision, and financial period against the prior screen. You can set a per-company rescreen alert for a price or multiple threshold, a screening-status change, or a new financial period; it fires only when you manually rescreen. Result rows and company reports can add a ticker to the current list. Select two to five result rows and choose **Compare** to review them under the same active criteria and lookback, with evidence confidence and source dates beside the valuation metrics.
+
+Scans and watchlists use local IndexedDB where available, with local-storage fallback. Scan progress shows analyzed, pending, and unresolved tickers; transient failures retry with backoff, and **Retry failed** rechecks unresolved symbols. Save failures are shown explicitly. **Export workspace** downloads a versioned JSON backup of the scan, watchlists, AI research, DCF models, and personal WACC defaults. **Import workspace** can add the backup to existing work or replace it after a confirmation. Keep the backup file somewhere you control; ClearFCF has no account-based sync.
+
+International exchange screening remains a gated future pilot. The current SEC-based qualification pipeline covers U.S. equities. The [product roadmap](../docs/clearfcf-app-audit-and-roadmap.md#ambitious-future-features) defines the evidence, source-rights, currency, and exchange-calendar checks required before another market can appear in the Idea Finder.
+
+Use Node 22 to create local Apple Silicon and Intel Mac packages. Add the following temporary block to `pnpm-workspace.yaml` so pnpm installs both native Codex executables:
+
+```yaml
+supportedArchitectures:
+  os:
+    - darwin
+  cpu:
+    - arm64
+    - x64
+```
+
+Then run:
 
 ```sh
+pnpm install --frozen-lockfile
 pnpm build:mac
 ```
 
-The packaged app is written to the `dist` folder. Public distribution without macOS security warnings requires Apple Developer signing and notarization.
+The DMG and ZIP packages are written to `dist`. Remove the temporary `supportedArchitectures` block after building; the release workflow adds it automatically. A local build without a Developer ID certificate is an unsigned test build. Do not distribute it as the public Mac release.
 
 ## Automatic Mac app synchronization
 
 Packaged Mac builds check GitHub Releases for updates after launch and download newer versions automatically. When an update finishes downloading, ClearFCF prompts to restart and install it.
 
-To publish a synchronized Mac release:
+To publish the 1.2.0 Mac release, configure these GitHub Actions secrets first:
+
+- `MAC_CSC_LINK`: base64-encoded Developer ID Application `.p12` certificate
+- `MAC_CSC_KEY_PASSWORD`: certificate password
+- `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`, and `APPLE_TEAM_ID`: App Store Connect API key credentials for notarization (recommended), or `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`
+
+After the source and release notes are committed to `main`, push the matching version tag:
 
 ```sh
 pnpm test
-npm version patch --no-git-tag-version
-git commit -am "Release v1.0.1"
-git tag v1.0.1
-git push origin main --tags
+git tag v1.2.0
+git push origin v1.2.0
 ```
 
-The `.github/workflows/mac-release.yml` workflow runs on `v*` tags, builds the Mac app, publishes it to the GitHub release, and uploads the updater metadata consumed by the app. Set `CLEARFCF_DISABLE_UPDATES=1` before launching the app to skip update checks during local packaged-build testing.
+The `.github/workflows/mac-release.yml` workflow requires the matching tag and signing credentials, runs tests, builds Apple Silicon and Intel packages, signs and notarizes them, verifies the app bundles, and then publishes the draft GitHub release with updater metadata. A missing credential or failed verification keeps the release unpublished. Set `CLEARFCF_DISABLE_UPDATES=1` before launching the app to skip update checks during local packaged-build testing.
 
 ## What it includes
 - **Selectable Screening Universes**: live, validated S&P 500 (Large Cap), S&P 400 (Mid Cap), and S&P 600 (Small Cap) constituent tables; Full SEC Operating Universe (~4,000+); or Yahoo Discovery lists
-- **Stop-and-Resume Market Scans**: Scan the selected universe continuously, stop after any completed batch, and resume later without losing results
+- **Complete, Recoverable Market Scans**: Scan the selected universe, stop after a completed batch, resume later, and retry unresolved tickers without silently skipping them
+- **Saved Research Workspace**: Named watchlists, company notes, review status, prior-run changes, local backups, and two-to-five-company comparison
 - **Adjustable Result Filters and Columns**: Tune display-only thresholds and save the exact result columns you want to see without changing qualification status
 - **Equal-Weighted Normalized FCF**: 50/50 blend of simple average annual margin and aggregate volume-weighted margin × latest annual revenue
 - **Economic FCF (post-SBC)**: Explicitly tracks Stock-Based Compensation as an ongoing economic compensation expense

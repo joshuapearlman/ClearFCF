@@ -1138,6 +1138,7 @@ function summary(report) {
     valuationMultiplePercentile: round(report.valuationHistory?.multiplePercentile, 4),
     drawdownFromHigh: round(report.valuationHistory?.drawdownFromHigh, 4),
     marketDataAsOf: report.marketDataAsOf,
+    priceSource: report.sources?.price || null,
     financialPeriodEnd: report.rows?.[0]?.evidence?.revenue?.periodEnd || String(report.rows?.[0]?.year || ""),
     primaryReason: report.primaryReason,
     nonQualificationReason: report.nonQualificationReason,
@@ -1212,7 +1213,7 @@ async function analyzeBatch(tickers, options = {}) {
       try {
         reports[ticker] = await analyzeTicker(ticker, { ...options, ...(options.quotes?.[ticker] || {}) });
       } catch (error) {
-        failures.push({ ticker, error: error.message || "Analysis failed." });
+        failures.push({ ticker, error: error.message || "Analysis failed.", statusCode: error.statusCode || null });
       }
       // Pace ticker analyses to reduce the risk of Yahoo/SEC rate limiting.
       if (pacingMs > 0) await new Promise((r) => setTimeout(r, pacingMs));

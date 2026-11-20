@@ -7,6 +7,14 @@ const CASES = ["bear", "base", "bull"];
 const CASE_LABELS = { bear: "Bear", base: "Base", bull: "Bull" };
 const STORAGE_PREFIX = "clearfcf-financial-analysis-v2:";
 const COLLAPSE_STORAGE_KEY = "clearfcf-financial-analysis-collapsed-v1";
+const WACC_DEFAULTS_KEY = "clearfcf-wacc-defaults-v1";
+
+function loadWaccDefaults() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(WACC_DEFAULTS_KEY));
+    return saved && typeof saved === "object" ? saved : null;
+  } catch { return null; }
+}
 
 function loadCollapsedSections() {
   try {
@@ -117,6 +125,7 @@ function setAllSectionsCollapsed(collapsed) {
 }
 
 function defaultWacc(report) {
+  const personal = loadWaccDefaults();
   const recent = report.rows.slice(0, state.historicalYears);
   const taxRate = Math.min(0.45, Math.max(0, average(recent.map((row) => row.effectiveTaxRate)) ?? 0.21));
   const interest = recent.find((row) => finite(row.interest))?.interest;
@@ -125,19 +134,21 @@ function defaultWacc(report) {
   const yahooBeta = report.quote?.beta;
   return {
     mode: "calculated",
-    riskFreeRate: 0.0425,
+    riskFreeRate: finite(personal?.riskFreeRate) ? number(personal.riskFreeRate) : 0.0425,
     beta: finite(yahooBeta) ? number(yahooBeta) : 1,
-    equityRiskPremium: 0.05,
+    equityRiskPremium: finite(personal?.equityRiskPremium) ? number(personal.equityRiskPremium) : 0.05,
     additionalPremium: 0,
     preTaxCostOfDebt: estimatedDebtCost,
     taxRate,
     equityValue: number(report.valuation?.marketCap),
     debtValue: debt,
     manualWacc: 0.09,
+    assumptionDates: { riskFreeRate: personal?.assumptionDates?.riskFreeRate || "", equityRiskPremium: personal?.assumptionDates?.equityRiskPremium || "" },
+    reviewedAt: null,
     sources: {
-      riskFreeRate: "Model starting assumption — replace with the current Treasury yield",
+      riskFreeRate: personal ? "Personal default — verify its date" : "Undated model starting assumption — replace with the current Treasury yield",
       beta: finite(yahooBeta) ? "Yahoo Finance beta" : "Model fallback because Yahoo beta was unavailable",
-      equityRiskPremium: "Model starting assumption — user editable",
+      equityRiskPremium: personal ? "Personal default — verify its date" : "Undated model starting assumption — user editable",
       additionalPremium: "User input",
       preTaxCostOfDebt: debt > 0 && finite(interest) ? "Latest SEC interest expense ÷ debt" : "Model fallback because debt cost inputs were unavailable",
       taxRate: "Average effective tax rate from selected SEC history",
@@ -206,6 +217,7 @@ function currentBridge(report) {
 function rehydrateWacc(report, storedWacc = {}) {
   const fresh = defaultWacc(report);
   const storedSources = storedWacc?.sources || {};
+  for (const key of ["riskFreeRate", "equityRiskPremium"]) if (finite(storedWacc?.[key])) fresh[key] = number(storedWacc[key]);
   for (const key of Object.keys(fresh.sources)) {
     if (storedSources[key] === "User input" && Object.hasOwn(storedWacc, key)) {
       fresh[key] = storedWacc[key];
@@ -213,6 +225,8 @@ function rehydrateWacc(report, storedWacc = {}) {
     }
   }
   fresh.mode = storedWacc?.mode === "manual" ? "manual" : "calculated";
+  fresh.assumptionDates = { ...fresh.assumptionDates, ...(storedWacc?.assumptionDates || {}) };
+  fresh.reviewedAt = storedWacc?.reviewedAt || null;
   return fresh;
 }
 
@@ -251,11 +265,18 @@ function initializeModel(report) {
 
 function loadStored(ticker) {
   try { return JSON.parse(localStorage.getItem(STORAGE_PREFIX + ticker)); }
-  catch { return null; }
+  catch {
+    $("#save-state").textContent = "Saved model could not be loaded";
+    $("#save-state").dataset.state = "error";
+    return null;
+  }
 }
 function save() {
-  if (!state.report) return;
-  localStorage.setItem(STORAGE_PREFIX + state.report.ticker, JSON.stringify({
+  if (!state.report) return false;
+  const node = $("#save-state");
+  node.textContent = "Saving…";
+  node.dataset.state = "saving";
+  try { localStorage.setItem(STORAGE_PREFIX + state.report.ticker, JSON.stringify({
     historicalYears: state.historicalYears,
     forecastYears: state.forecastYears,
     convention: state.convention,
@@ -264,10 +285,17 @@ function save() {
     bridgeSources: state.bridgeSources,
     snapshots: state.snapshots
   }));
-  const node = $("#save-state");
   node.textContent = "Saved locally";
+  node.dataset.state = "saved";
   clearTimeout(save.timer);
   save.timer = setTimeout(() => { node.textContent = "Changes save locally"; }, 1200);
+  return true;
+  } catch (error) {
+    node.textContent = "Save failed — export your model";
+    node.dataset.state = "error";
+    showMessage(`Model could not be saved: ${error.message}`, true);
+    return false;
+  }
 }
 
 function normalizeForecastLengths() {
@@ -561,6 +589,9 @@ function renderWacc() {
     ${field("Market value of equity ($M)", "equityValue", model.wacc.equityValue, { group: "wacc", money: true, hint: sources.equityValue })}
     ${field("Debt value ($M)", "debtValue", model.wacc.debtValue, { group: "wacc", money: true, hint: sources.debtValue })}
     ${model.wacc.mode === "manual" ? field("Manual WACC", "manualWacc", model.wacc.manualWacc, { group: "wacc", percent: true, wide: true, hint: sources.manualWacc }) : ""}
+    <label class="field"><span>Risk-free rate as of</span><input type="date" data-wacc-date="riskFreeRate" value="${escapeHtml(model.wacc.assumptionDates?.riskFreeRate || "")}"></label>
+    <label class="field"><span>Equity risk premium as of</span><input type="date" data-wacc-date="equityRiskPremium" value="${escapeHtml(model.wacc.assumptionDates?.equityRiskPremium || "")}"></label>
+    <div class="wacc-review"><p><strong>Assumption review:</strong> ${model.wacc.reviewedAt ? escapeHtml(new Date(model.wacc.reviewedAt).toLocaleString()) : "Required before saving a forecast or exporting a valuation."}</p><button type="button" id="review-wacc" class="secondary">Mark assumptions reviewed</button><button type="button" id="save-wacc-defaults" class="secondary">Use rates as my defaults</button></div>
     <div class="formula-box"><strong>Calculated WACC</strong><span>E ÷ (D + E) × cost of equity + D ÷ (D + E) × pre-tax debt cost × (1 − tax rate)</span><small>Cost of equity = risk-free rate + beta × equity risk premium + additional premium.</small></div>
     <div class="calculation-strip"><div><span>Cost of equity</span><strong>${percent(wacc.costOfEquity, 2)}</strong></div><div><span>After-tax debt cost</span><strong>${percent(wacc.afterTaxCostOfDebt, 2)}</strong></div><div><span>Active WACC</span><strong>${percent(wacc.wacc, 2)}</strong></div></div>
   </div>`;
@@ -640,6 +671,7 @@ function renderQuality() {
 
 function saveSnapshot() {
   const model = state.cases[state.activeCase];
+  if (!model.wacc.reviewedAt) return showMessage("Review the active case’s WACC assumptions before saving a forecast.", true);
   const result = dcf.calculateCase(model, state.bridge, state.convention);
   const lastYear = result.years.at(-1) || {};
   state.snapshots.unshift({
@@ -660,8 +692,7 @@ function saveSnapshot() {
     bridgeSources: { ...state.bridgeSources }
   });
   state.snapshots = state.snapshots.slice(0, 20);
-  updateAndRender();
-  showMessage(`Saved the ${CASE_LABELS[state.activeCase]} forecast snapshot.`);
+  if (updateAndRender()) showMessage(`Saved the ${CASE_LABELS[state.activeCase]} forecast snapshot.`);
 }
 
 function renderSnapshots() {
@@ -730,8 +761,9 @@ function renderAll() {
 }
 
 function updateAndRender() {
-  save();
+  const saved = save();
   renderAll();
+  return saved;
 }
 
 function syncVisibleDriverInputs(model) {
@@ -798,6 +830,74 @@ $("#driver-card").addEventListener("click", (event) => {
   showMessage(`Applied the ${ratioMethodLabel(method)} to D&A, CapEx, and all operating-NWC components, then rebuilt the ${CASE_LABELS[state.activeCase]} case.`);
 });
 $("#save-snapshot").addEventListener("click", saveSnapshot);
+$("#wacc-card").addEventListener("click", (event) => {
+  const wacc = state.cases[state.activeCase]?.wacc;
+  if (!wacc) return;
+  if (event.target.closest("#review-wacc")) {
+    if (!wacc.assumptionDates?.riskFreeRate || !wacc.assumptionDates?.equityRiskPremium) return showMessage("Set the as-of dates for the risk-free rate and equity risk premium before reviewing.", true);
+    wacc.reviewedAt = new Date().toISOString();
+    if (updateAndRender()) showMessage(`${CASE_LABELS[state.activeCase]} WACC assumptions reviewed.`);
+  }
+  if (event.target.closest("#save-wacc-defaults")) {
+    if (!wacc.reviewedAt) return showMessage("Review the WACC assumptions before saving personal defaults.", true);
+    try {
+      localStorage.setItem(WACC_DEFAULTS_KEY, JSON.stringify({ riskFreeRate: wacc.riskFreeRate, equityRiskPremium: wacc.equityRiskPremium,
+        assumptionDates: wacc.assumptionDates, savedAt: new Date().toISOString() }));
+      showMessage("Risk-free rate and equity risk premium saved as personal defaults for new models.");
+    } catch (error) { showMessage(`Personal defaults could not be saved: ${error.message}`, true); }
+  }
+});
+
+function valuationExport() {
+  if (!state.report) throw new Error("Load a company before exporting a valuation.");
+  if (!state.cases[state.activeCase]?.wacc.reviewedAt) throw new Error("Review the active case’s WACC assumptions before exporting a valuation.");
+  return {
+    format: "clearfcf-valuation", version: 1, exportedAt: new Date().toISOString(),
+    ticker: state.report.ticker, companyName: state.report.companyName,
+    financialPeriodEnd: state.report.rows?.[0]?.periodEnd || null,
+    marketDataAsOf: state.report.marketDataAsOf || null,
+    sources: state.report.sources || {}, activeCase: state.activeCase,
+    historicalYears: state.historicalYears, forecastYears: state.forecastYears, convention: state.convention,
+    bridge: state.bridge, bridgeSources: state.bridgeSources, cases: state.cases,
+    results: Object.fromEntries(CASES.map((name) => [name, dcf.calculateCase(state.cases[name], state.bridge, state.convention)]))
+  };
+}
+
+$("#export-model-json").addEventListener("click", () => {
+  try {
+    const exportData = valuationExport();
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" }));
+    link.download = `clearfcf-valuation-${exportData.ticker}-${exportData.exportedAt.slice(0, 10)}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    showMessage("Valuation model exported with assumptions and source dates.");
+  } catch (error) { showMessage(error.message, true); }
+});
+
+$("#print-valuation").addEventListener("click", () => {
+  try {
+    const exportData = valuationExport();
+    const body = CASES.map((name) => {
+      const result = exportData.results[name];
+      const wacc = exportData.cases[name].wacc;
+      return `<tr><th>${escapeHtml(CASE_LABELS[name])}</th><td>${percent(result.wacc, 2)}</td><td>${compact(result.enterpriseValue)}</td><td>${perShare(result.impliedSharePrice)}</td><td>${percent(result.upside)}</td><td>${escapeHtml(wacc.reviewedAt ? new Date(wacc.reviewedAt).toLocaleDateString() : "Unreviewed")}</td></tr>`;
+    }).join("");
+    const active = exportData.cases[exportData.activeCase];
+    const assumptions = CASES.map((name) => {
+      const model = exportData.cases[name];
+      return `<tr><th>${escapeHtml(CASE_LABELS[name])}</th><td>${escapeHtml(model.drivers.revenueMethod)}</td><td>${escapeHtml(model.drivers.ebitMarginMethod)}</td><td>${percent(model.wacc.riskFreeRate, 2)} (${escapeHtml(model.wacc.assumptionDates?.riskFreeRate || "undated")})</td><td>${percent(model.wacc.equityRiskPremium, 2)} (${escapeHtml(model.wacc.assumptionDates?.equityRiskPremium || "undated")})</td><td>${escapeHtml(model.terminal.method)} / ${percent(model.terminal.growthRate, 2)} / ${escapeHtml(model.terminal.exitMultiple)}x</td></tr>`;
+    }).join("");
+    $("#valuation-print-report").innerHTML = `<h1>ClearFCF valuation · ${escapeHtml(exportData.ticker)}</h1><p>${escapeHtml(exportData.companyName)} · Exported ${escapeHtml(new Date(exportData.exportedAt).toLocaleString())}</p>
+      <h2>Scenario values</h2><table><thead><tr><th>Case</th><th>WACC</th><th>Enterprise value</th><th>Implied share price</th><th>Upside/downside</th><th>WACC reviewed</th></tr></thead><tbody>${body}</tbody></table>
+      <h2>Case assumptions</h2><table><thead><tr><th>Case</th><th>Revenue method</th><th>EBIT margin method</th><th>Risk-free rate / date</th><th>Equity premium / date</th><th>Terminal method / growth / exit</th></tr></thead><tbody>${assumptions}</tbody></table>
+      <h2>Active case assumptions: ${escapeHtml(CASE_LABELS[exportData.activeCase])}</h2><p>Risk-free rate ${percent(active.wacc.riskFreeRate, 2)} as of ${escapeHtml(active.wacc.assumptionDates?.riskFreeRate || "unavailable")}; equity risk premium ${percent(active.wacc.equityRiskPremium, 2)} as of ${escapeHtml(active.wacc.assumptionDates?.equityRiskPremium || "unavailable")}; beta ${escapeHtml(active.wacc.beta)}; pre-tax debt cost ${percent(active.wacc.preTaxCostOfDebt, 2)}; terminal method ${escapeHtml(active.terminal.method)}; terminal growth ${percent(active.terminal.growthRate, 2)}; exit multiple ${escapeHtml(active.terminal.exitMultiple)}x.</p>
+      <p>Historical years: ${exportData.historicalYears}; forecast years: ${exportData.forecastYears}; discount convention: ${escapeHtml(exportData.convention)}. Current price: ${perShare(exportData.bridge.currentPrice)}.</p>
+      <h2>Evidence and sources</h2><p>Financial period: ${escapeHtml(exportData.financialPeriodEnd || "unavailable")}; market data as of: ${escapeHtml(exportData.marketDataAsOf || "unavailable")}. Financials: ${escapeHtml(exportData.sources.financials || "unavailable")}. Price: ${escapeHtml(exportData.sources.price || "unavailable")}.</p>
+      <p>Model values are estimates based on the assumptions above. Review the full ClearFCF report and original filings before relying on them.</p>`;
+    window.print();
+  } catch (error) { showMessage(error.message, true); }
+});
 $(".case-tabs").addEventListener("click", (event) => {
   const name = event.target.closest("button")?.dataset.case;
   if (!name) return;
@@ -840,6 +940,16 @@ $("#workspace").addEventListener("change", (event) => {
         : target.dataset.inputType === "percent" ? number(target.value) / 100
           : number(target.value);
     if (target.dataset.wacc !== "mode") model.wacc.sources = { ...(model.wacc.sources || {}), [target.dataset.wacc]: "User input" };
+    if (["riskFreeRate", "equityRiskPremium"].includes(target.dataset.wacc)) {
+      model.wacc.assumptionDates ||= {};
+      model.wacc.assumptionDates[target.dataset.wacc] = "";
+    }
+    model.wacc.reviewedAt = null;
+  } else if (target.dataset.waccDate) {
+    model.wacc.assumptionDates ||= {};
+    model.wacc.assumptionDates[target.dataset.waccDate] = target.value;
+    if (String(model.wacc.sources?.[target.dataset.waccDate]).startsWith("Undated")) model.wacc.sources[target.dataset.waccDate] = "Model starting assumption — as-of date supplied by user; verify rate";
+    model.wacc.reviewedAt = null;
   } else if (target.dataset.terminal) {
     model.terminal[target.dataset.terminal] = target.tagName === "SELECT" ? target.value
       : target.dataset.inputType === "percent" ? number(target.value) / 100

@@ -25,17 +25,115 @@
     return requested === "3" || requested === "5" ? requested : "all";
   }
 
-  function marketDate(timestamp) {
+  function easternParts(timestamp) {
     const date = new Date(timestamp);
     if (!Number.isFinite(date.getTime())) return null;
     const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit"
+      timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23"
     }).formatToParts(date);
-    const fields = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-    return `${fields.year}-${fields.month}-${fields.day}`;
+    return Object.fromEntries(parts.map((part) => [part.type, part.value]));
   }
 
-  function marketDataFreshness(asOf, now = Date.now()) {
+  function marketDate(timestamp) {
+    const fields = easternParts(timestamp);
+    return fields ? `${fields.year}-${fields.month}-${fields.day}` : null;
+  }
+
+  function dateKey(year, month, day) {
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+
+  function nthWeekday(year, month, weekday, nth) {
+    const first = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+    return dateKey(year, month, 1 + (weekday - first + 7) % 7 + (nth - 1) * 7);
+  }
+
+  function lastWeekday(year, month, weekday) {
+    const last = new Date(Date.UTC(year, month, 0));
+    return dateKey(year, month, last.getUTCDate() - (last.getUTCDay() - weekday + 7) % 7);
+  }
+
+  function observedHoliday(year, month, day, saturdayObserved = true) {
+    const date = new Date(Date.UTC(year, month - 1, day));
+    const weekday = date.getUTCDay();
+    if (weekday === 0) date.setUTCDate(date.getUTCDate() + 1);
+    if (weekday === 6 && saturdayObserved) date.setUTCDate(date.getUTCDate() - 1);
+    return date.toISOString().slice(0, 10);
+  }
+
+  function easterSunday(year) {
+    const a = year % 19, b = Math.floor(year / 100), c = year % 100;
+    const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+    const g = Math.floor((b - f + 1) / 3);
+    const h = (19 * a + b - d - g + 15) % 30;
+    const i = Math.floor(c / 4), k = c % 4;
+    const l = (32 + 2 * e + 2 * i - h - k + 7) % 7;
+    const m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const month = Math.floor((h + l - 7 * m + 114) / 31);
+    const day = ((h + l - 7 * m + 114) % 31) + 1;
+    return new Date(Date.UTC(year, month - 1, day));
+  }
+
+  // Recurring NYSE/Nasdaq cash-equity holidays. Exchange notices remain authoritative
+  // for exceptional closures and early closes: https://www.nyse.com/trade/hours-calendars
+  const EXTRA_CLOSED = new Set();
+  const EXTRA_EARLY_CLOSES = new Map();
+  const holidaysByYear = new Map();
+  function marketHolidays(year) {
+    if (holidaysByYear.has(year)) return holidaysByYear.get(year);
+    const goodFriday = easterSunday(year);
+    goodFriday.setUTCDate(goodFriday.getUTCDate() - 2);
+    const holidays = new Set([
+      observedHoliday(year, 1, 1, false),
+      nthWeekday(year, 1, 1, 3),
+      nthWeekday(year, 2, 1, 3),
+      goodFriday.toISOString().slice(0, 10),
+      lastWeekday(year, 5, 1),
+      observedHoliday(year, 6, 19),
+      observedHoliday(year, 7, 4),
+      nthWeekday(year, 9, 1, 1),
+      nthWeekday(year, 11, 4, 4),
+      observedHoliday(year, 12, 25)
+    ]);
+    holidaysByYear.set(year, holidays);
+    return holidays;
+  }
+
+  function isMarketSession(day, extraClosed = EXTRA_CLOSED) {
+    const date = new Date(`${day}T12:00:00Z`);
+    if (!Number.isFinite(date.getTime())) return false;
+    const weekday = date.getUTCDay();
+    return weekday !== 0 && weekday !== 6 && !marketHolidays(date.getUTCFullYear()).has(day) && !extraClosed.has(day);
+  }
+
+  function marketCloseMinutes(day, earlyCloses = EXTRA_EARLY_CLOSES) {
+    if (earlyCloses.has(day)) return earlyCloses.get(day);
+    const year = Number(day.slice(0, 4));
+    const thanksgiving = nthWeekday(year, 11, 4, 4);
+    const afterThanksgiving = new Date(`${thanksgiving}T12:00:00Z`);
+    afterThanksgiving.setUTCDate(afterThanksgiving.getUTCDate() + 1);
+    if (day === afterThanksgiving.toISOString().slice(0, 10)) return 13 * 60;
+    if (day === dateKey(year, 12, 24) && isMarketSession(day)) return 13 * 60;
+    return 16 * 60;
+  }
+
+  function latestExpectedSession(now, calendar = {}) {
+    const parts = easternParts(now);
+    if (!parts) return null;
+    let day = `${parts.year}-${parts.month}-${parts.day}`;
+    const minutes = Number(parts.hour) * 60 + Number(parts.minute);
+    const extraClosed = calendar.closedDates || EXTRA_CLOSED;
+    if (isMarketSession(day, extraClosed) && minutes >= marketCloseMinutes(day, calendar.earlyCloses) + 30) return day;
+    let cursor = new Date(`${day}T12:00:00Z`);
+    for (let n = 0; n < 14; n += 1) {
+      cursor.setUTCDate(cursor.getUTCDate() - 1);
+      day = cursor.toISOString().slice(0, 10);
+      if (isMarketSession(day, extraClosed)) return day;
+    }
+    return null;
+  }
+
+  function marketDataFreshness(asOf, now = Date.now(), calendar = {}) {
     if (!asOf) return "missing";
     const quoteTime = Date.parse(asOf);
     const currentTime = new Date(now).getTime();
@@ -44,15 +142,19 @@
     const quoteDate = marketDate(quoteTime);
     const currentDate = marketDate(currentTime);
     if (!quoteDate || !currentDate || quoteDate > currentDate) return "stale";
-    let businessDays = 0;
-    const cursor = new Date(`${quoteDate}T12:00:00Z`);
-    const end = new Date(`${currentDate}T12:00:00Z`);
-    while (cursor < end) {
-      cursor.setUTCDate(cursor.getUTCDate() + 1);
-      const day = cursor.getUTCDay();
-      if (day !== 0 && day !== 6) businessDays += 1;
-      if (businessDays > 1) return "stale";
-    }
+    const expected = latestExpectedSession(currentTime, calendar);
+    if (!expected || quoteDate < expected) return "stale";
+    const current = easternParts(currentTime);
+    const quote = easternParts(quoteTime);
+    const currentMinutes = Number(current.hour) * 60 + Number(current.minute);
+    const quoteMinutes = Number(quote.hour) * 60 + Number(quote.minute);
+    const close = marketCloseMinutes(currentDate, calendar.earlyCloses);
+    const activeSession = isMarketSession(currentDate, calendar.closedDates || EXTRA_CLOSED)
+      && currentMinutes >= 9 * 60 + 50 && currentMinutes < close + 30;
+    if (activeSession && currentTime - quoteTime > 20 * 60 * 1000) return "delayed";
+    const expectedClose = marketCloseMinutes(expected, calendar.earlyCloses);
+    if (quoteDate === expected && currentDate !== expected && quoteMinutes < expectedClose - 20) return "delayed";
+    if (quoteDate === currentDate && currentMinutes >= close + 30 && quoteMinutes < close - 20) return "delayed";
     return "fresh";
   }
 
@@ -134,10 +236,13 @@
     if (instrumentType && instrumentType !== "EQUITY") {
       excluded.push("Market quote is no longer an active equity listing");
     }
+    const quotedPrice = get("price", "valuation", "price");
+    if (!finite(quotedPrice)) fail.push("Market price is unavailable");
     if (Object.hasOwn(row || {}, "marketDataAsOf")) {
       const freshness = marketDataFreshness(row.marketDataAsOf);
       if (freshness === "missing") fail.push("Market price timestamp is unavailable");
       else if (freshness === "stale") fail.push(`Market price is stale (last quote ${marketDate(row.marketDataAsOf) || "unknown"})`);
+      else if (freshness === "delayed") fail.push(`Market price is delayed (last quote ${row.marketDataAsOf})`);
       else pass.push("Market price is current");
     }
 
@@ -206,5 +311,5 @@
     return { status, passes: pass, failures: fail, unknowns: unknown, exclusions: excluded, reasons, selected };
   }
 
-  return { evaluateCandidate, selectedMetrics, lookbackKey, marketDataFreshness };
+  return { evaluateCandidate, selectedMetrics, lookbackKey, marketDataFreshness, isMarketSession, latestExpectedSession };
 });
