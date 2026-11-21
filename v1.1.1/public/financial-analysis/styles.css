@@ -46,6 +46,23 @@ h2 { font-family: Georgia, serif; font-size: 27px; letter-spacing: -.025em; marg
 select, input[type="number"], input[type="text"] { border: 1px solid var(--line); background: #fff; border-radius: 8px; min-height: 38px; padding: 7px 9px; color: var(--ink); }
 .controls select { min-width: 130px; }
 .save-state { margin-left: auto; color: var(--muted); font-size: 12px; padding-bottom: 10px; }
+.save-state[data-state="error"] { color: var(--red); font-weight: 800; }
+.valuation-export { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin: -10px 0 26px; }
+.valuation-export span { margin-right: auto; color: var(--muted); font-size: 12px; }
+.wacc-review { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--line); }
+.wacc-review p { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; }
+.field input[type="date"] { min-height: 38px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: white; }
+@media print {
+  @page { size: A4; margin: 15mm; }
+  body { background: white; color: black; }
+  .topbar, main { display: none !important; }
+  #valuation-print-report { display: block !important; padding: 0; }
+  #valuation-print-report h1 { font-size: 30px; margin: 0 0 8px; }
+  #valuation-print-report h2 { margin: 20px 0 8px; font-size: 18px; }
+  #valuation-print-report p { font-size: 12px; line-height: 1.5; }
+  #valuation-print-report table { min-width: 0; width: 100%; border-collapse: collapse; }
+  #valuation-print-report th, #valuation-print-report td { position: static; padding: 8px; font-size: 10px; text-align: left; white-space: normal; border-bottom: 1px solid #bbb; }
+}
 .analysis-nav { display: flex; gap: 8px; flex-wrap: wrap; padding: 9px; margin: -10px 0 22px; }
 .analysis-nav a { color: var(--ink); text-decoration: none; padding: 8px 13px; border-radius: 8px; font-size: 12px; font-weight: 800; }
 .analysis-nav a:hover { color: var(--green); background: var(--green-soft); }

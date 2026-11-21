@@ -14,7 +14,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-  <link rel="stylesheet" href="/styles.css?v=8">
+  <link rel="stylesheet" href="/styles.css?v=11">
   <link rel="stylesheet" href="/audit.css">
 </head>
 <body>
@@ -150,15 +150,21 @@
         </div>
         <div class="progress-track"><div id="progress-bar"></div></div>
         <div class="scan-stats">
-          <div><span>Examined</span><strong id="scan-examined">0 / 0</strong></div>
+          <div><span>Analyzed</span><strong id="scan-examined">0 / 0</strong></div>
           <div><span>Current batch</span><strong id="scan-batch">—</strong></div>
           <div><span>Ideas found</span><strong id="scan-ideas">0</strong></div>
-          <div><span>Failures</span><strong id="scan-failures">0</strong></div>
+          <div><span>Pending</span><strong id="scan-pending">0</strong></div>
+          <div><span>Unresolved</span><strong id="scan-failures">0</strong></div>
           <div><span>Time remaining</span><strong id="scan-eta">Calculating…</strong></div>
           <div><span>Request health</span><strong id="scan-health" class="health-good">Pacing active</strong></div>
         </div>
         <div class="scan-dashboard-foot">
           <span id="progress-text">Waiting to begin.</span>
+          <span id="scan-save-state" role="status">Not yet saved</span>
+        </div>
+        <div id="scan-failure-panel" class="scan-failure-panel hidden">
+          <details><summary>Unresolved tickers <span id="scan-failure-count">0</span></summary><ul id="scan-failure-list"></ul></details>
+          <button id="retry-failed-button" type="button" class="secondary compact-button">Retry failed</button>
         </div>
       </div>
 
@@ -193,13 +199,25 @@
 
     <!-- VIEW 2: WATCHLIST -->
     <section id="screen" class="view">
+      <div class="panel workspace-panel">
+        <div class="workspace-heading"><div><p class="kicker">Research workspace</p><h2>Saved watchlists</h2><p class="muted">Keep your thesis, risks, review status, and prior screen in this browser.</p></div><span id="workspace-save-state" role="status">Loading saved work…</span></div>
+        <div class="workspace-toolbar">
+          <form id="watchlist-create" class="inline-form"><label class="sr-only" for="watchlist-name">New watchlist name</label><input id="watchlist-name" maxlength="80" placeholder="New watchlist name" required><button class="primary" type="submit">Create list</button></form>
+          <div class="workspace-backup"><button type="button" class="secondary" id="workspace-export">Export workspace</button><label class="secondary file-button" for="workspace-import">Import workspace</label><input id="workspace-import" type="file" accept="application/json,.json" class="sr-only"><label for="workspace-import-mode" class="sr-only">Import mode</label><select id="workspace-import-mode" aria-label="Import behavior"><option value="merge">Add to my work</option><option value="replace">Replace my work</option></select></div>
+        </div>
+        <div class="workspace-toolbar list-toolbar"><label for="watchlist-select">Current list</label><select id="watchlist-select" aria-label="Saved watchlist"></select><button type="button" class="secondary" id="watchlist-rescreen">Rescreen list</button><button type="button" class="utility-button" id="watchlist-delete">Delete list</button></div>
+        <form id="watchlist-add-form" class="inline-form"><label class="sr-only" for="watchlist-add-tickers">Add tickers to saved list</label><input id="watchlist-add-tickers" placeholder="Add tickers: AAPL, MSFT…" autocomplete="off"><button type="submit" class="secondary">Add tickers</button></form>
+        <div id="watchlist-entries"></div>
+        <div id="watchlist-run-summary"></div>
+      </div>
       <div class="panel">
-        <p class="kicker">Your watchlist</p>
+        <p class="kicker">Quick screen</p>
         <h2>Paste up to 50 tickers</h2>
         <form id="screen-form">
           <label for="ticker-list">Separate tickers with commas, spaces, or new lines</label>
           <textarea id="ticker-list" rows="5" placeholder="AAPL, MSFT, GOOGL, AMZN, GM, DVN, OMC..."></textarea>
           <button class="primary" type="submit">Screen tickers</button>
+          <button class="secondary" id="save-screened-tickers" type="button">Add to current list</button>
         </form>
       </div>
       <div id="screen-results">
@@ -227,6 +245,11 @@
       <div id="report"></div>
     </section>
   </main>
+
+  <div id="compare-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="compare-title">
+    <div class="modal-backdrop" id="compare-backdrop"></div>
+    <div class="modal-card compare-modal-card"><div class="compare-modal-head"><div><p class="kicker">Same active criteria</p><h2 id="compare-title">Company comparison</h2></div><button type="button" id="compare-close" class="secondary">Close</button></div><div id="compare-content" class="table-scroll"></div></div>
+  </div>
 
   <!-- DEEP ANALYSIS CHOOSER -->
   <div id="deep-analysis-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="deep-analysis-title">
@@ -351,7 +374,10 @@
     </div>
   </footer>
 
-  <script src="/screening.js?v=4" defer></script>
-  <script src="/app.js?v=10" defer></script>
+  <script src="/screening.js?v=5" defer></script>
+  <script src="/scan-state.js?v=1" defer></script>
+  <script src="/storage.js?v=1" defer></script>
+  <script src="/workspace-model.js?v=2" defer></script>
+  <script src="/app.js?v=14" defer></script>
 </body>
 </html>

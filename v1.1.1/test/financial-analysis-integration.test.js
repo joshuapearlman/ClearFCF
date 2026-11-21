@@ -75,4 +75,9 @@ test("Financial Deep Analysis is served by the main ClearFCF application", () =>
   assert.equal(rewrites.get("/financial-analysis/app.js"), "/public/financial-analysis/app.js");
   assert.equal(rewrites.get("/financial-analysis/engine.js"), "/public/financial-analysis/engine.js");
   assert.equal(rewrites.get("/financial-analysis/styles.css"), "/public/financial-analysis/styles.css");
+  for (const asset of ["scan-state.js", "storage.js", "workspace-model.js"]) {
+    assert.match(server, new RegExp(`"/${asset.replace(".", "\\.")}"`));
+    assert.match(desktopServer, new RegExp(`"/${asset.replace(".", "\\.")}"`));
+    assert.equal(rewrites.get(`/${asset}`), `/public/${asset}`);
+  }
 });

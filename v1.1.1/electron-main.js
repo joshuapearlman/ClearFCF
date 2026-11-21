@@ -1,7 +1,7 @@
 "use strict";
 
 const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
-const { autoUpdater } = require("electron-updater");
+const crypto = require("node:crypto");
 const http = require("node:http");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
@@ -9,6 +9,18 @@ const path = require("node:path");
 const server = require("./desktop-server");
 
 let mainWindow;
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+app.on("second-instance", () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+});
+
+function localServerPort() {
+  const hash = crypto.createHash("sha256").update(app.getPath("userData")).digest();
+  return 40000 + (hash.readUInt16BE(0) % 20000);
+}
 
 ipcMain.handle("clearfcf:save-report-pdf", async (event, options = {}) => {
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {
@@ -61,7 +73,8 @@ function waitForServer(url, timeoutMs = 15000) {
 }
 
 async function createWindow() {
-  const preferredPort = Number(process.env.PORT) || 0;
+  // A stable origin keeps IndexedDB and localStorage available across Mac app launches.
+  const preferredPort = app.isPackaged ? localServerPort() : Number(process.env.PORT) || 0;
 
   try {
     const appServer = await server.start(preferredPort, { openExternal: (targetUrl) => shell.openExternal(targetUrl) });
@@ -113,45 +126,14 @@ async function createWindow() {
     });
 
     await mainWindow.loadURL(url);
-    checkForUpdates();
   } catch (error) {
     dialog.showErrorBox("ClearFCF could not start", error.message);
     app.quit();
   }
 }
 
-function checkForUpdates() {
-  if (!app.isPackaged || process.env.CLEARFCF_DISABLE_UPDATES === "1") return;
-
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
-
-  autoUpdater.on("error", (error) => {
-    console.warn("ClearFCF update check failed:", error.message);
-  });
-
-  autoUpdater.on("update-downloaded", async () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-
-    const { response } = await dialog.showMessageBox(mainWindow, {
-      type: "info",
-      buttons: ["Restart", "Later"],
-      defaultId: 0,
-      cancelId: 1,
-      title: "ClearFCF update ready",
-      message: "A new version of ClearFCF has been downloaded.",
-      detail: "Restart the app to finish syncing to the latest version."
-    });
-
-    if (response === 0) autoUpdater.quitAndInstall();
-  });
-
-  autoUpdater.checkForUpdates().catch((error) => {
-    console.warn("ClearFCF update check failed:", error.message);
-  });
-}
-
-app.whenReady().then(createWindow);
+if (hasSingleInstanceLock) app.whenReady().then(createWindow);
+else app.quit();
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

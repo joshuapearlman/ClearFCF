@@ -1,6 +1,6 @@
 {
   "name": "clear-fcf-screener",
-  "version": "1.1.3",
+  "version": "1.2.0",
   "private": true,
   "description": "Transparent normalized free-cash-flow stock screener for Vercel",
   "main": "server.js",
@@ -12,13 +12,11 @@
     "start": "node server.js",
     "dcf": "node dcf-server.js",
     "app": "electron electron-main.js",
-    "build:mac": "electron-builder --mac",
-    "publish:mac": "electron-builder --mac --publish always",
+    "build:mac": "node scripts/check-mac-deps.cjs && electron-builder --mac dmg --arm64 --x64 --publish never",
     "dist": "electron-builder"
   },
   "dependencies": {
-    "@openai/codex": "^0.147.0",
-    "electron-updater": "^6.8.11"
+    "@openai/codex": "^0.147.0"
   },
   "devDependencies": {
     "electron": "^45.2.1",
@@ -29,17 +27,11 @@
     "productName": "ClearFCF",
     "mac": {
       "category": "public.app-category.finance",
-      "target": [
-        "dmg",
-        "zip"
-      ],
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "target": ["dmg"],
       "icon": "public/icon-mark.png"
-    },
-    "publish": {
-      "provider": "github",
-      "owner": "joshuapearlman",
-      "repo": "ClearFCF",
-      "releaseType": "release"
     },
     "files": [
       "api/**/*",

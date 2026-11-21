@@ -2,8 +2,11 @@
 
 const $ = (selector) => document.querySelector(selector);
 const screening = window.ClearFcfScreening;
+const scanState = window.ClearFcfScanState;
+const workspaceStorage = window.ClearFcfStorage;
+const workspaceModel = window.ClearFcfWorkspaceModel;
 
-if (!screening?.evaluateCandidate) {
+if (!screening?.evaluateCandidate || !scanState?.applyBatch || !workspaceStorage?.set || !workspaceModel?.normalize) {
   throw new Error("ClearFCF screening module failed to load. Refresh the page to load the latest application files.");
 }
 
@@ -73,6 +76,8 @@ const COLUMN_STORAGE_KEY = "clear-fcf-visible-columns-v1";
 const state = {
   auto: null,
   reports: {},
+  workspace: workspaceModel.normalize(null),
+  activeWatchlistId: null,
   researchReports: {},
   researchJobs: {},
   researchSettings: { model: "gpt-5.6-sol", effort: "high" },
@@ -119,6 +124,8 @@ const STORAGE_KEY = "clear-fcf-auto-v4";
 const PERFORMANCE_KEY = "clear-fcf-performance-v1";
 const RESEARCH_STORAGE_KEY = "clear-fcf-deep-research-v1";
 const RESEARCH_SETTINGS_KEY = "clear-fcf-research-settings-v1";
+const WORKSPACE_KEY = "clearfcf-research-workspace-v1";
+const MAX_BACKUP_BYTES = 100 * 1024 * 1024;
 const RESEARCH_MODELS = [
   ["gpt-5.6-sol", "GPT-5.6 Sol"],
   ["gpt-5.6-terra", "GPT-5.6 Terra"],
@@ -235,12 +242,16 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 }
 
-function loadSavedResearch() {
+async function loadSavedResearch() {
   try {
-    const saved = JSON.parse(localStorage.getItem(RESEARCH_STORAGE_KEY)) || {};
-    if (saved && typeof saved === "object" && !Array.isArray(saved)) state.researchReports = saved;
-  } catch {
-    state.researchReports = {};
+    const saved = await workspaceStorage.get(RESEARCH_STORAGE_KEY);
+    if (saved && typeof saved === "object" && !Array.isArray(saved)) {
+      state.researchReports = { ...saved, ...state.researchReports };
+      const ticker = $("#single-ticker")?.value.trim().toUpperCase();
+      if (ticker) updateResearchPanel(ticker);
+    }
+  } catch (error) {
+    setStatus(`Saved AI research could not be loaded: ${error.message}`, true);
   }
 }
 
@@ -256,16 +267,23 @@ function saveResearchSettings() {
   try { localStorage.setItem(RESEARCH_SETTINGS_KEY, JSON.stringify(state.researchSettings)); } catch {}
 }
 
-function saveResearchReport(ticker, report) {
+let researchWriteQueue = Promise.resolve();
+async function saveResearchReport(ticker, report) {
   state.researchReports[ticker] = report;
   const entries = Object.entries(state.researchReports)
     .sort((a, b) => String(b[1]?.generatedAt || "").localeCompare(String(a[1]?.generatedAt || "")))
     .slice(0, 10);
   state.researchReports = Object.fromEntries(entries);
-  try { localStorage.setItem(RESEARCH_STORAGE_KEY, JSON.stringify(state.researchReports)); } catch {}
+  const snapshot = { ...state.researchReports };
+  researchWriteQueue = researchWriteQueue.catch(() => {}).then(() => workspaceStorage.set(RESEARCH_STORAGE_KEY, snapshot));
+  try { await researchWriteQueue; return true; }
+  catch (error) {
+    setStatus(`AI research could not be saved: ${error.message}`, true);
+    return false;
+  }
 }
 
-loadSavedResearch();
+void loadSavedResearch();
 loadResearchSettings();
 
 function setStatus(message, error = false) {
@@ -334,7 +352,11 @@ function initialIdeaEmptyHtml() {
 async function request(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
+  if (!response.ok) {
+    const error = new Error(data.error || `Request failed (${response.status}).`);
+    error.statusCode = response.status;
+    throw error;
+  }
   return data;
 }
 
@@ -377,21 +399,21 @@ const RESULT_COLUMNS = [
 ];
 
 function companyCell(row) {
-  return `<button type="button" class="company-link" data-open-report="${escapeHtml(row.ticker)}" aria-label="Open ${escapeHtml(row.ticker)} company report">
+  return `<div class="company-cell-actions"><label title="Select ${escapeHtml(row.ticker)} for comparison"><input type="checkbox" data-compare-ticker="${escapeHtml(row.ticker)}" aria-label="Compare ${escapeHtml(row.ticker)}"></label><button type="button" class="company-link" data-open-report="${escapeHtml(row.ticker)}" aria-label="Open ${escapeHtml(row.ticker)} company report">
     <span class="ticker">${escapeHtml(row.ticker)}</span>
     <span class="subname">${escapeHtml(row.companyName)}</span>
     ${row.netDebtToNfcf !== null && row.netDebtToNfcf < 0 ? '<span class="badge badge-netcash">Net Cash</span>' : ''}
     ${row.fcfTrajectory === 'Expanding' ? '<span class="badge badge-green">Expanding</span>' : ''}
     ${row.insiderBuying ? '<span class="badge badge-green">Insider Buying</span>' : ''}
     <span class="result-summary ${row.status === "Idea" ? "" : "not-qualified"}">${escapeHtml(row.status === "Idea" ? (row.decisionSummary || "Qualified as an Idea") : `Why not Idea: ${row.nonQualificationReason || row.primaryReason || "See screening details"}`)}</span>
-  </button>`;
+  </button><button type="button" class="save-row-button" data-save-to-list="${escapeHtml(row.ticker)}" title="Add ${escapeHtml(row.ticker)} to current watchlist" aria-label="Add ${escapeHtml(row.ticker)} to current watchlist">＋</button></div>`;
 }
 
 function resultCell(row, key) {
   const cells = {
     ticker: () => companyCell(row),
     status: () => `<span class="badge ${String(row.status).toLowerCase()}">${escapeHtml(row.status)}</span>`,
-    price: () => `${compact(row.price, true)}<small class="cell-note">${row.marketDataAsOf ? `Price as of ${escapeHtml(new Date(row.marketDataAsOf).toLocaleDateString())}${screening.marketDataFreshness(row.marketDataAsOf) === "stale" ? " · stale" : ""}` : "Price date unavailable"}</small>`,
+    price: () => `${compact(row.price, true)}<small class="cell-note">${row.marketDataAsOf ? `Price as of ${escapeHtml(new Date(row.marketDataAsOf).toLocaleString())} · ${escapeHtml(screening.marketDataFreshness(row.marketDataAsOf))}` : "Price date unavailable"}${row.priceSource ? ` · ${escapeHtml(row.priceSource)}` : ""}</small>`,
     marketCap: () => compact(row.marketCap, true),
     priceToNfcf: () => multiple(row.priceToNfcf),
     priceToEconomicNfcf: () => multiple(row.priceToEconomicNfcf),
@@ -422,11 +444,11 @@ function columnPickerHtml() {
   </details>`;
 }
 
-function tableHtml(results, title, statusFilter = "All", counts = {}) {
+function tableHtml(results, title, statusFilter = "All", counts = {}, compareCount = 0) {
   const tabs = `<div class="status-tabs" role="tablist" aria-label="Result status">
     ${["All", "Idea", "Review", "Excluded"].map((status) => `<button type="button" role="tab" aria-selected="${statusFilter === status}" tabindex="${statusFilter === status ? "0" : "-1"}" class="status-tab ${statusFilter === status ? "active" : ""}" data-status-filter="${status}">${status} <span>${counts[status] || 0}</span></button>`).join("")}
   </div>`;
-  const tools = `<div class="results-tools">${tabs}${columnPickerHtml()}<button class="export" type="button">Export CSV</button></div>`;
+  const tools = `<div class="results-tools">${tabs}${columnPickerHtml()}<button class="compare-button secondary" type="button" ${compareCount < 2 ? "disabled" : ""}>Compare ${compareCount || ""}</button><button class="export" type="button">Export CSV</button></div>`;
   if (!results.length) return `<div class="results-shell">
     <div class="results-head"><h2>${escapeHtml(title)} <small>(${counts.All || 0})</small></h2>${tools}</div>
     <div class="empty-state compact-empty filtered-empty" role="tabpanel" tabindex="0">
@@ -450,6 +472,23 @@ function tableHtml(results, title, statusFilter = "All", counts = {}) {
 
 function attachTableEvents(container, results) {
   container.querySelectorAll("[data-open-report]").forEach((button) => button.addEventListener("click", () => openReport(button.dataset.openReport)));
+  container.querySelectorAll("[data-save-to-list]").forEach((button) => button.addEventListener("click", () => void addTickerToCurrentList(button.dataset.saveToList)));
+  container.querySelectorAll("[data-compare-ticker]").forEach((input) => {
+    input.checked = container._compareSelected?.has(input.dataset.compareTicker) || false;
+    input.addEventListener("change", () => {
+      container._compareSelected ||= new Set();
+      if (input.checked && container._compareSelected.size >= 5) {
+        input.checked = false;
+        return setStatus("Compare up to five companies at a time.", true);
+      }
+      if (input.checked) container._compareSelected.add(input.dataset.compareTicker);
+      else container._compareSelected.delete(input.dataset.compareTicker);
+      const button = container.querySelector(".compare-button");
+      button.disabled = container._compareSelected.size < 2;
+      button.textContent = `Compare ${container._compareSelected.size || ""}`;
+    });
+  });
+  container.querySelector(".compare-button")?.addEventListener("click", () => openComparison(container));
 
   container.querySelectorAll("[data-sort]").forEach((button) => button.addEventListener("click", () => {
     const sortKey = button.dataset.sort;
@@ -557,13 +596,13 @@ function renderTable(container, results, title, defaultStatus = "All") {
   const counts = { All: evaluated.length, Idea: 0, Review: 0, Excluded: 0 };
   evaluated.forEach((row) => { if (counts[row.status] !== undefined) counts[row.status] += 1; });
   const filtered = applyFilterAndSort(results, container._statusFilter);
-  container.innerHTML = tableHtml(filtered, title, container._statusFilter, counts);
+  container.innerHTML = tableHtml(filtered, title, container._statusFilter, counts, container._compareSelected?.size || 0);
   if (isFirstRender) container.querySelector(".results-shell")?.classList.add("reveal");
   attachTableEvents(container, results);
 }
 
 function exportCsv(results) {
-  const fields = ["ticker", "companyName", "status", "nonQualificationReason", "decisionSummary", "primaryReason", "price", "marketCap", "priceToNfcf", "priceToEconomicNfcf", "evToUnleveredNfcf", "fcfYield", "dividendYield", "fiveYearDividendYield", "dividendPayoutRatio", "dividendGrowth5y", "dividendYearsWithoutCut", "dividendCoverage", "shareholderYield", "buybackCashYield", "sbcYield", "netBuybackYield", "dividendRate", "exDividendDate", "insiderBuying", "insiderPurchaseCount", "insiderNetShares", "insiderAveragePurchasePrice", "insiderClusterBuying", "insiderValueAligned", "insiderSignal", "latestInsiderPurchaseDate", "valuationHistoryContext", "valuationMultiplePercentile", "drawdownFromHigh", "marketDataAsOf", "financialPeriodEnd", "economicFcfYield", "fcfTrajectory", "buybackRating", "buybackAuditReason", "buybackPrice", "capexToDnaRatio", "usableYears", "netDebtToNfcf", "shortDebt", "cash", "shareChange", "shareChangeYears", "shareChangeAnnualized", "normalizedSbcToFcf", "latestSbcToFcf"];
+  const fields = ["ticker", "companyName", "status", "nonQualificationReason", "decisionSummary", "primaryReason", "price", "priceSource", "marketCap", "priceToNfcf", "priceToEconomicNfcf", "evToUnleveredNfcf", "fcfYield", "dividendYield", "fiveYearDividendYield", "dividendPayoutRatio", "dividendGrowth5y", "dividendYearsWithoutCut", "dividendCoverage", "shareholderYield", "buybackCashYield", "sbcYield", "netBuybackYield", "dividendRate", "exDividendDate", "insiderBuying", "insiderPurchaseCount", "insiderNetShares", "insiderAveragePurchasePrice", "insiderClusterBuying", "insiderValueAligned", "insiderSignal", "latestInsiderPurchaseDate", "valuationHistoryContext", "valuationMultiplePercentile", "drawdownFromHigh", "marketDataAsOf", "financialPeriodEnd", "economicFcfYield", "fcfTrajectory", "buybackRating", "buybackAuditReason", "buybackPrice", "capexToDnaRatio", "usableYears", "netDebtToNfcf", "shortDebt", "cash", "shareChange", "shareChangeYears", "shareChangeAnnualized", "normalizedSbcToFcf", "latestSbcToFcf"];
   const quote = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
   const csv = [fields.join(","), ...results.map((row) => fields.map((key) => quote(row[key])).join(","))].join("\n");
   const link = document.createElement("a");
@@ -755,7 +794,7 @@ function renderInsiderEvidence(report) {
 
 function renderFreshness(report) {
   return `<div class="freshness-strip">
-    <span><b>Market data</b> ${escapeHtml(report.marketDataAsOf ? new Date(report.marketDataAsOf).toLocaleString() : 'date unavailable')}</span>
+    <span><b>Market data</b> ${escapeHtml(report.marketDataAsOf ? new Date(report.marketDataAsOf).toLocaleString() : 'date unavailable')} · ${escapeHtml(screening.marketDataFreshness(report.marketDataAsOf))} · ${escapeHtml(report.sources?.price || 'source unavailable')}</span>
     <span><b>Financial period</b> ${escapeHtml(report.rows?.[0]?.evidence?.revenue?.periodEnd || report.rows?.[0]?.year || 'unavailable')}</span>
     <span><b>Latest insider purchase</b> ${escapeHtml(report.insiders?.latestPurchaseDate || 'none found')}</span>
   </div>`;
@@ -942,6 +981,7 @@ function renderReport(report) {
       </div>
       <div class="report-actions">
         ${researchSettingsMarkup()}
+        <button type="button" class="btn secondary report-save-list" data-ticker="${escapeHtml(report.ticker)}">＋ Watchlist</button>
         <button type="button" class="btn primary deep-analysis-btn" data-ticker="${escapeHtml(report.ticker)}">✦ Deep Analysis</button>
         <button type="button" class="btn secondary memo-btn" data-ticker="${escapeHtml(report.ticker)}">↓ Save PDF</button>
         <span class="badge ${String(evaluation.status).toLowerCase()}">${escapeHtml(evaluation.status)}</span>
@@ -1115,45 +1155,65 @@ $("#screen-form").addEventListener("submit", async (event) => {
   } catch (error) { setStatus(error.message, true); }
 });
 
+let scanWriteQueue = Promise.resolve();
+function scanSaveMessage(message, error = false) {
+  const indicator = $("#scan-save-state");
+  if (!indicator) return;
+  indicator.textContent = message;
+  indicator.dataset.state = error ? "error" : "saved";
+}
+
 function saveAuto() {
-  try {
-    if (state.auto) {
-      state.auto.criteria = { ...state.criteria };
-      state.auto.activePreset = state.activePreset;
-    }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.auto));
-  } catch {}
+  if (!state.auto) return Promise.resolve(true);
+  state.auto.criteria = { ...state.criteria };
+  state.auto.activePreset = state.activePreset;
+  const snapshot = scanState.forStorage(state.auto);
+  scanSaveMessage("Saving…");
+  scanWriteQueue = scanWriteQueue.catch(() => {}).then(() => workspaceStorage.set(STORAGE_KEY, snapshot));
+  return scanWriteQueue.then(() => {
+    scanSaveMessage("Saved locally");
+    return true;
+  }).catch((error) => {
+    scanSaveMessage("Save failed — export your work", true);
+    setStatus(`Scan could not be saved: ${error.message}`, true);
+    return false;
+  });
 }
 
 function updateAutoUi() {
   const scan = state.auto;
   if (!scan) return;
-  const max = scan.symbols.length;
-  const examined = Math.min(scan.cursor, max);
-  const percentComplete = max ? Math.round((examined / max) * 100) : 0;
-  const completedThisRun = Math.max(0, examined - Number(scan.runStartCursor || 0));
+  const counts = scanState.stats(scan);
+  const max = counts.total;
+  const accounted = counts.analyzed + counts.unresolved;
+  const percentComplete = max ? Math.round((accounted / max) * 100) : 0;
+  const completedThisRun = Math.max(0, accounted - Number(scan.runStartCursor || 0));
   const elapsedSeconds = scan.runStartedAt ? (Date.now() - scan.runStartedAt) / 1000 : 0;
   const secondsPerTicker = completedThisRun > 0 ? elapsedSeconds / completedThisRun : NaN;
-  const eta = scan.complete ? "Complete" : state.stopped ? "Stopped" : formatDuration((max - examined) * secondsPerTicker);
+  const eta = scan.complete ? "Complete" : state.stopped ? "Stopped" : formatDuration(counts.pending * secondsPerTicker);
   $("#progress-wrap").classList.remove("hidden");
   $("#progress-bar").style.width = `${percentComplete}%`;
-  $("#progress-text").textContent = `${examined}/${max} examined • ${scan.results.length} ${scan.results.length === 1 ? "idea" : "ideas"} found`;
+  $("#progress-text").textContent = `${counts.analyzed} analyzed • ${counts.unresolved} unresolved • ${counts.pending} pending`;
   $("#scan-percent").textContent = `${percentComplete}%`;
-  $("#scan-examined").textContent = `${examined} / ${max}`;
+  $("#scan-examined").textContent = `${counts.analyzed} / ${max}`;
   const performance = readPerformanceSettings();
   const batchSize = performance.batchSize;
-  $("#scan-batch").textContent = examined ? `${Math.ceil(examined / batchSize)} / ${Math.ceil(max / batchSize)}` : `— / ${Math.ceil(max / batchSize)}`;
+  $("#scan-batch").textContent = accounted ? `${Math.ceil(accounted / batchSize)} / ${Math.ceil(max / batchSize)}` : `— / ${Math.ceil(max / batchSize)}`;
   $("#scan-ideas").textContent = String(scan.results.length);
-  $("#scan-failures").textContent = String(scan.failures.length);
+  $("#scan-pending").textContent = String(counts.pending);
+  $("#scan-failures").textContent = String(counts.unresolved);
   $("#scan-eta").textContent = eta;
-  $("#scan-state").textContent = scan.complete ? "Scan complete" : state.stopped ? "Scan stopped" : "Analyzing companies";
+  $("#scan-state").textContent = scan.complete ? counts.unresolved ? "Scan finished with unresolved tickers" : "Scan complete" : state.stopped ? "Scan stopped" : "Analyzing companies";
+  $("#scan-failure-panel").classList.toggle("hidden", counts.unresolved === 0);
+  $("#scan-failure-count").textContent = String(counts.unresolved);
+  $("#scan-failure-list").innerHTML = scan.failures.map((item) => `<li><strong>${escapeHtml(item.ticker)}</strong> — ${escapeHtml(item.error)}</li>`).join("");
   const health = $("#scan-health");
   health.textContent = scan.rateLimited
     ? "Rate limit pause"
     : `${performance.workers} worker${performance.workers === 1 ? "" : "s"} • ${performance.pacingMs}ms pacing`;
   health.classList.toggle("health-warning", Boolean(scan.rateLimited));
   health.classList.toggle("health-good", !scan.rateLimited);
-  if (examined > 0) {
+  if (counts.analyzed > 0) {
     $("#result-filters")?.classList.remove("hidden");
     renderTable($("#idea-results"), scan.allExamined || scan.results, "Analyzed companies", "Idea");
   }
@@ -1161,71 +1221,70 @@ function updateAutoUi() {
 
 async function runAuto() {
   const scan = state.auto;
+  scanState.normalize(scan);
   state.stopped = false;
   scan.runStartedAt = Date.now();
-  scan.runStartCursor = scan.cursor;
+  scan.runStartCursor = scan.allExamined.length + scan.failures.length;
   scan.rateLimited = false;
   $("#progress-wrap").classList.add("is-running");
   $("#find-button").classList.add("hidden");
   $("#stop-button").classList.remove("hidden");
   $("#stop-button").disabled = false;
-  const max = scan.symbols.length;
   try {
-    scan.allExamined = scan.allExamined || [];
-
-    while (scan.cursor < max && !state.stopped) {
+    while (scan.pending.length && !state.stopped && state.auto === scan) {
       const performance = readPerformanceSettings(true);
-      const batchRows = scan.symbols.slice(scan.cursor, scan.cursor + performance.batchSize);
-      const batch = batchRows.map((item) => item.ticker);
-      const data = await request("/api/screen", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tickers: batch,
-          criteria: state.criteria,
-          performance
-        })
-      });
-      scan.cursor += batchRows.length;
-      Object.assign(state.reports, data.reports);
-
-      // Store in allExamined
-      const existingExamined = new Set(scan.allExamined.map((r) => r.ticker));
-      for (const row of data.results) {
-        if (!existingExamined.has(row.ticker)) {
-          scan.allExamined.push(row);
-          existingExamined.add(row.ticker);
-        }
+      const selection = scanState.nextBatch(scan, performance.batchSize);
+      if (!selection.tickers.length) {
+        setStatus(`Waiting ${Math.ceil(selection.waitMs / 1000)}s before retrying the data source.`);
+        await new Promise((resolve) => setTimeout(resolve, Math.min(selection.waitMs || 1000, 30_000)));
+        continue;
       }
-
-      // Re-filter ideas from all examined based on active criteria
+      const batch = selection.tickers;
+      let data;
+      try {
+        data = await request("/api/screen", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(120_000),
+          body: JSON.stringify({ tickers: batch, criteria: state.criteria, performance })
+        });
+      } catch (error) {
+        const failure = { error: error.message, statusCode: error.statusCode || null };
+        if (!scanState.isTransient(failure)) throw error;
+        data = { results: [], reports: {}, failures: batch.map((ticker) => ({ ticker, ...failure })) };
+      }
+      if (state.auto !== scan) break;
+      Object.assign(state.reports, data.reports);
+      const outcome = scanState.applyBatch(scan, batch, data);
       scan.results = scan.allExamined.filter((r) => evaluateReportStatus(r, state.criteria) === "Idea");
-      scan.failures.push(...data.failures);
-      saveAuto();
+      const saved = await saveAuto();
       updateAutoUi();
+      if (!saved) { state.stopped = true; break; }
 
-      const hasRateLimit = data.failures?.some((f) => String(f.error || "").includes("429"));
+      const hasRateLimit = data.failures?.some((failure) => failure.statusCode === 429 || String(failure.error || "").includes("429"));
       if (hasRateLimit) {
         scan.rateLimited = true;
         updateAutoUi();
-        setStatus("SEC rate limit reached. Pausing 2.5s...", true);
-        await new Promise((r) => setTimeout(r, 2500));
+        setStatus("Data source rate limit reached. Failed tickers are queued for retry.", true);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       } else {
         scan.rateLimited = false;
-        setStatus(`Auto Finder: examined ${scan.cursor} and found ${scan.results.length} ideas.`);
+        setStatus(`Scan: ${scan.allExamined.length} analyzed, ${outcome.retrying.length} queued for retry, ${scan.failures.length} unresolved.`);
         if (performance.frontendPauseMs > 0) {
-          await new Promise((r) => setTimeout(r, performance.frontendPauseMs));
+          await new Promise((resolve) => setTimeout(resolve, performance.frontendPauseMs));
         }
       }
     }
-    scan.complete = scan.cursor >= max;
-    saveAuto();
+    if (state.auto !== scan) return;
+    scan.complete = scan.pending.length === 0;
+    const saved = await saveAuto();
     updateAutoUi();
+    if (!saved) return;
     const reason = state.stopped ? "stopped" : "complete";
-    setStatus(`Scan ${reason}: ${scan.results.length} ideas from ${scan.cursor} companies.`);
+    setStatus(`Scan ${reason}: ${scan.allExamined.length} analyzed, ${scan.failures.length} unresolved, ${scan.results.length} ideas.`);
   } catch (error) {
     state.stopped = true;
-    updateAutoUi();
+    if (state.auto === scan) updateAutoUi();
     setStatus(`Scan stopped: ${error.message}. Press Resume to continue.`, true);
   } finally {
     $("#progress-wrap").classList.remove("is-running");
@@ -1233,17 +1292,20 @@ async function runAuto() {
     $("#find-button").disabled = false;
     $("#stop-button").classList.add("hidden");
     $("#stop-button").disabled = true;
-    $("#find-button").textContent = scan.complete ? "Start new scan" : "Resume scan";
+    if (state.auto === scan) $("#find-button").textContent = scan.complete ? "Start new scan" : "Resume scan";
   }
 }
 $("#find-button").addEventListener("click", async () => {
   const universeType = $("#universe-select")?.value || "yahoo";
-  if (state.auto && !state.auto.complete && state.auto.universeType === universeType) return runAuto();
+  if (state.auto && !state.auto.complete && state.auto.universeType === universeType) {
+    if (await saveAuto()) return runAuto();
+    return;
+  }
   try {
     setStatus("Loading idea lists...");
     $("#find-button").disabled = true;
     const universe = await request(`/api/universe?type=${encodeURIComponent(universeType)}&perSource=100`);
-    state.auto = {
+    state.auto = scanState.normalize({
       universeType,
       symbols: universe.symbols,
       sources: universe.sources,
@@ -1252,8 +1314,11 @@ $("#find-button").addEventListener("click", async () => {
       failures: [],
       startedAt: new Date().toISOString(),
       complete: false
-    };
-    saveAuto();
+    });
+    if (!await saveAuto()) {
+      $("#find-button").disabled = false;
+      return;
+    }
     updateAutoUi();
     setStatus(`Loaded ${universe.symbols.length} candidates.`);
     await runAuto();
@@ -1263,6 +1328,14 @@ $("#find-button").addEventListener("click", async () => {
   }
 });
 
+$("#retry-failed-button")?.addEventListener("click", async () => {
+  if (!state.auto || $("#progress-wrap").classList.contains("is-running")) return;
+  scanState.retryFailed(state.auto);
+  await saveAuto();
+  updateAutoUi();
+  await runAuto();
+});
+
 $("#stop-button").addEventListener("click", () => {
   state.stopped = true;
   $("#stop-button").disabled = true;
@@ -1270,11 +1343,12 @@ $("#stop-button").addEventListener("click", () => {
   setStatus("Stopping after the current batch. Your results will be preserved.");
 });
 
-// Restore previous scan state if exists
-try {
-  const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-  if (saved?.symbols && Array.isArray(saved.results)) {
-    state.auto = saved;
+// Restore previous scan state if it exists, including scans saved by earlier versions.
+void (async () => {
+  try {
+    const saved = await workspaceStorage.get(STORAGE_KEY);
+    if (!saved?.symbols || state.auto) return;
+    state.auto = scanState.normalize(saved);
     state.stopped = !saved.complete;
     state.auto.runStartedAt = null;
     if (saved.criteria) {
@@ -1286,18 +1360,17 @@ try {
       state.activePreset = saved.activePreset || "custom";
       syncCriteriaControls(state.criteria, state.activePreset);
     }
-    if (Array.isArray(state.auto.allExamined)) {
-      state.auto.results = state.auto.allExamined.filter((row) => evaluateReportStatus(row, state.criteria) === "Idea");
-    }
+    state.auto.results = state.auto.allExamined.filter((row) => evaluateReportStatus(row, state.criteria) === "Idea");
     if ($("#target")) $("#target").value = String(saved.target);
     $("#find-button").textContent = saved.complete ? "Start new scan" : "Resume scan";
-    saveAuto();
     updateAutoUi();
+    scanSaveMessage("Saved locally");
     hideStatus();
+  } catch (error) {
+    scanSaveMessage("Saved scan could not be loaded", true);
+    setStatus(`Saved scan could not be loaded: ${error.message}`, true);
   }
-} catch {
-  localStorage.removeItem(STORAGE_KEY);
-}
+})();
 
 // Result filters and qualification criteria
 function initResultFilters() {
@@ -1723,13 +1796,13 @@ async function pollResearchJob(ticker, jobId) {
     state.researchJobs[ticker] = job;
     updateResearchPanel(ticker);
     if (job.status === "completed") {
-      saveResearchReport(ticker, {
+      const saved = await saveResearchReport(ticker, {
         ...job.result,
         researchConfiguration: { model: job.model, effort: job.effort }
       });
       delete state.researchJobs[ticker];
       updateResearchPanel(ticker);
-      setStatus(`${ticker} AI deep analysis complete.`);
+      if (saved) setStatus(`${ticker} AI deep analysis complete and saved locally.`);
       return;
     }
     if (["failed", "cancelled"].includes(job.status)) {
@@ -1855,6 +1928,11 @@ $("#choose-ai-analysis")?.addEventListener("click", () => {
 $("#choose-financial-analysis")?.addEventListener("click", closeDeepAnalysisModal);
 
 $("#report")?.addEventListener("click", (event) => {
+  const saveButton = event.target.closest(".report-save-list[data-ticker]");
+  if (saveButton) {
+    void addTickerToCurrentList(saveButton.dataset.ticker);
+    return;
+  }
   const analysisButton = event.target.closest(".deep-analysis-btn[data-ticker]");
   if (analysisButton) {
     openDeepAnalysisModal(analysisButton.dataset.ticker, analysisButton);
@@ -2027,10 +2105,9 @@ $("#lookback-select")?.addEventListener("change", (e) => {
 });
 
 // Reset Search functionality
-function resetSearch() {
+async function resetSearch() {
   state.stopped = true;
   state.auto = null;
-  try { localStorage.removeItem(STORAGE_KEY); } catch {}
   const container = $("#idea-results");
   if (container) {
     container.innerHTML = initialIdeaEmptyHtml();
@@ -2045,7 +2122,15 @@ function resetSearch() {
   $("#stop-button").disabled = true;
   $("#stop-button").classList.add("hidden");
   $("#find-button").textContent = "Start scan";
-  setStatus("Scan reset. Choose a universe and start when ready.");
+  try {
+    await scanWriteQueue.catch(() => {});
+    await workspaceStorage.remove(STORAGE_KEY);
+    scanSaveMessage("Not yet saved");
+    setStatus("Scan reset. Choose a universe and start when ready.");
+  } catch (error) {
+    scanSaveMessage("Reset could not be saved", true);
+    setStatus(`Saved scan could not be cleared: ${error.message}`, true);
+  }
 }
 $("#reset-search-btn")?.addEventListener("click", resetSearch);
 
@@ -2075,4 +2160,329 @@ $("#tol-ev-multiple")?.addEventListener("input", (e) => {
     $("#tol-ev-multiple-val").textContent = `${val}x`;
   }
   markCustom();
+});
+
+// Saved research workspace
+let watchlistWriteQueue = Promise.resolve();
+const watchlistReady = (async () => {
+  try {
+    state.workspace = workspaceModel.normalize(await workspaceStorage.get(WORKSPACE_KEY));
+    state.activeWatchlistId = state.workspace.watchlists[0]?.id || null;
+    $("#workspace-save-state").textContent = "Saved locally";
+  } catch (error) {
+    $("#workspace-save-state").textContent = "Saved work could not be loaded";
+    $("#workspace-save-state").dataset.state = "error";
+    setStatus(`Watchlists could not be loaded: ${error.message}`, true);
+  }
+  renderWatchlists();
+})();
+
+function currentWatchlist() {
+  return state.workspace.watchlists.find((list) => list.id === state.activeWatchlistId) || null;
+}
+
+function saveWorkspace() {
+  const indicator = $("#workspace-save-state");
+  indicator.textContent = "Saving…";
+  indicator.dataset.state = "saving";
+  const snapshot = workspaceModel.normalize(state.workspace);
+  watchlistWriteQueue = watchlistWriteQueue.catch(() => {}).then(() => workspaceStorage.set(WORKSPACE_KEY, snapshot));
+  return watchlistWriteQueue.then(() => {
+    indicator.textContent = "Saved locally";
+    indicator.dataset.state = "saved";
+    return true;
+  }).catch((error) => {
+    indicator.textContent = "Save failed — export your work";
+    indicator.dataset.state = "error";
+    setStatus(`Watchlist could not be saved: ${error.message}`, true);
+    return false;
+  });
+}
+
+function changeText(change) {
+  if (!change) return "First saved screen";
+  const parts = [];
+  if (change.pricePercent != null) parts.push(`Price ${change.pricePercent >= 0 ? "+" : ""}${percent(change.pricePercent)}`);
+  if (change.multipleChange != null) parts.push(`P/nFCF ${change.multipleChange >= 0 ? "+" : ""}${change.multipleChange.toFixed(1)}x`);
+  if (change.status) parts.push(change.status);
+  if (change.financialPeriodChanged) parts.push("New financial period");
+  return parts.join(" · ") || "No tracked change";
+}
+
+function renderWatchlists() {
+  const selected = currentWatchlist();
+  const picker = $("#watchlist-select");
+  picker.innerHTML = state.workspace.watchlists.length
+    ? state.workspace.watchlists.map((list) => `<option value="${escapeHtml(list.id)}" ${list.id === selected?.id ? "selected" : ""}>${escapeHtml(list.name)} (${list.entries.length})</option>`).join("")
+    : '<option value="">Create a watchlist to begin</option>';
+  for (const selector of ["#watchlist-rescreen", "#watchlist-delete", "#watchlist-add-tickers", "#watchlist-add-form button"]) {
+    const node = $(selector);
+    if (node) node.disabled = !selected;
+  }
+  if (!selected) {
+    $("#watchlist-entries").innerHTML = '<p class="workspace-empty">Create a list or add a company from a screen or report.</p>';
+    $("#watchlist-run-summary").innerHTML = "";
+    return;
+  }
+  $("#watchlist-entries").innerHTML = selected.entries.length ? `<p class="workspace-alert-hint">Optional alerts run when you click Rescreen list. They do not monitor prices or filings in the background.</p><div class="table-scroll"><table class="watchlist-table"><thead><tr><th>Company</th><th>Review status</th><th>Thesis</th><th>Key risk</th><th>Last reviewed</th><th>Rescreen alert</th><th>Actions</th></tr></thead><tbody>${selected.entries.map((entry) => `<tr>
+    <td><button type="button" class="text-link" data-watchlist-report="${escapeHtml(entry.ticker)}">${escapeHtml(entry.ticker)}</button></td>
+    <td><select data-entry-field="status" data-entry-ticker="${escapeHtml(entry.ticker)}">${["Watching", "Investigating", "Pass"].map((status) => `<option ${status === entry.status ? "selected" : ""}>${status}</option>`).join("")}</select></td>
+    <td><textarea rows="2" maxlength="2000" data-entry-field="thesis" data-entry-ticker="${escapeHtml(entry.ticker)}" aria-label="Thesis for ${escapeHtml(entry.ticker)}" placeholder="Why it may be interesting">${escapeHtml(entry.thesis)}</textarea></td>
+    <td><textarea rows="2" maxlength="2000" data-entry-field="risk" data-entry-ticker="${escapeHtml(entry.ticker)}" aria-label="Key risk for ${escapeHtml(entry.ticker)}" placeholder="What could break the thesis">${escapeHtml(entry.risk)}</textarea></td>
+    <td>${entry.lastReviewedAt ? escapeHtml(new Date(entry.lastReviewedAt).toLocaleDateString()) : "—"}</td>
+    <td><select data-entry-field="alertType" data-entry-ticker="${escapeHtml(entry.ticker)}" aria-label="Rescreen alert for ${escapeHtml(entry.ticker)}">${[["none", "Off"], ["price-below", "Price below"], ["multiple-below", "P/nFCF below"], ["status-change", "Status change"], ["new-period", "New financial period"]].map(([type, label]) => `<option value="${type}" ${type === entry.alert?.type ? "selected" : ""}>${label}</option>`).join("")}</select><input type="number" min="0.01" step="0.01" data-entry-field="alertThreshold" data-entry-ticker="${escapeHtml(entry.ticker)}" aria-label="Alert threshold for ${escapeHtml(entry.ticker)}" placeholder="Threshold" value="${entry.alert?.threshold ?? ""}" ${["price-below", "multiple-below"].includes(entry.alert?.type) ? "" : "disabled"}></td>
+    <td><div class="watchlist-actions"><button type="button" data-entry-review="${escapeHtml(entry.ticker)}" class="secondary compact-button">Mark reviewed</button><a href="/financial-analysis?ticker=${encodeURIComponent(entry.ticker)}">DCF ↗</a><button type="button" data-entry-remove="${escapeHtml(entry.ticker)}" class="utility-button">Remove</button></div></td>
+  </tr>`).join("")}</tbody></table></div>` : '<p class="workspace-empty">Add tickers to this list, then rescreen it.</p>';
+  const run = selected.lastRun;
+  if (!run) {
+    $("#watchlist-run-summary").innerHTML = '<p class="workspace-empty">No saved screen yet. Rescreen this list to establish a baseline.</p>';
+    return;
+  }
+  const criteriaChanged = selected.previousRun && JSON.stringify(run.criteria) !== JSON.stringify(selected.previousRun.criteria);
+  $("#watchlist-run-summary").innerHTML = `<div class="watchlist-run-head"><div><p class="kicker">Saved screen</p><h3>${escapeHtml(new Date(run.at).toLocaleString())}</h3><p class="muted">${run.rows.length} analyzed · ${run.failures.length} unresolved · ${escapeHtml(run.criteria.name || "Custom")} criteria${criteriaChanged ? " · Criteria changed since prior run" : ""}</p></div></div>
+    <div class="table-scroll"><table class="watchlist-deltas"><thead><tr><th>Ticker</th><th>Decision</th><th>Price</th><th>P/nFCF</th><th>Evidence</th><th>Financial period</th><th>Since prior run</th></tr></thead><tbody>${run.rows.map((row) => `<tr><td><button class="text-link" type="button" data-watchlist-report="${escapeHtml(row.ticker)}">${escapeHtml(row.ticker)}</button></td><td>${escapeHtml(row.status)}</td><td>${compact(row.price, true)}</td><td>${multiple(row.priceToNfcf)}</td><td>${escapeHtml(row.evidenceConfidence?.level || "Unknown")}</td><td>${escapeHtml(row.financialPeriodEnd || "Unavailable")}</td><td>${escapeHtml(criteriaChanged ? "Criteria changed; compare with care" : changeText(workspaceModel.changeFor(selected, row.ticker)))}</td></tr>`).join("")}</tbody></table></div>
+    ${run.alerts.length ? `<div class="workspace-alert-results"><strong>${run.alerts.length} rescreen alert${run.alerts.length === 1 ? "" : "s"}</strong><ul>${run.alerts.map((alert) => `<li>${escapeHtml(alert.ticker)}: ${escapeHtml(alert.reason)}</li>`).join("")}</ul></div>` : ""}
+    ${run.failures.length ? `<p class="workspace-failures">Unresolved: ${run.failures.map((failure) => `${escapeHtml(failure.ticker)} (${escapeHtml(failure.error)})`).join(" · ")}</p>` : ""}`;
+}
+
+async function addTickerToCurrentList(ticker) {
+  await watchlistReady;
+  try {
+    if (!currentWatchlist()) {
+      const created = workspaceModel.addWatchlist(state.workspace, "Research list");
+      state.workspace = created.workspace;
+      state.activeWatchlistId = created.id;
+    }
+    workspaceModel.addTickers(currentWatchlist(), [ticker]);
+    renderWatchlists();
+    if (await saveWorkspace()) setStatus(`${ticker} added to ${currentWatchlist().name}.`);
+  } catch (error) { setStatus(error.message, true); }
+}
+
+$("#watchlist-create")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await watchlistReady;
+  try {
+    const created = workspaceModel.addWatchlist(state.workspace, $("#watchlist-name").value);
+    state.workspace = created.workspace;
+    state.activeWatchlistId = created.id;
+    $("#watchlist-name").value = "";
+    renderWatchlists();
+    await saveWorkspace();
+  } catch (error) { setStatus(error.message, true); }
+});
+$("#watchlist-select")?.addEventListener("change", (event) => {
+  state.activeWatchlistId = event.target.value;
+  renderWatchlists();
+});
+$("#watchlist-add-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const list = currentWatchlist();
+  if (!list) return;
+  try {
+    workspaceModel.addTickers(list, parseTickers($("#watchlist-add-tickers").value));
+    $("#watchlist-add-tickers").value = "";
+    renderWatchlists();
+    await saveWorkspace();
+  } catch (error) { setStatus(error.message, true); }
+});
+$("#watchlist-delete")?.addEventListener("click", async () => {
+  const list = currentWatchlist();
+  if (!list || !window.confirm(`Delete the saved watchlist “${list.name}”?`)) return;
+  state.workspace.watchlists = state.workspace.watchlists.filter((item) => item.id !== list.id);
+  state.activeWatchlistId = state.workspace.watchlists[0]?.id || null;
+  renderWatchlists();
+  await saveWorkspace();
+});
+$("#watchlist-entries")?.addEventListener("change", async (event) => {
+  const target = event.target.closest("[data-entry-field]");
+  const list = currentWatchlist();
+  const entry = list?.entries.find((item) => item.ticker === target?.dataset.entryTicker);
+  if (!entry) return;
+  if (target.dataset.entryField === "alertType") {
+    entry.alert.type = target.value;
+    if (!["price-below", "multiple-below"].includes(target.value)) entry.alert.threshold = null;
+    renderWatchlists();
+  } else if (target.dataset.entryField === "alertThreshold") {
+    entry.alert.threshold = Number(target.value) > 0 ? Number(target.value) : null;
+  } else entry[target.dataset.entryField] = target.value;
+  list.updatedAt = new Date().toISOString();
+  await saveWorkspace();
+});
+$("#watchlist-entries")?.addEventListener("click", async (event) => {
+  const reportButton = event.target.closest("[data-watchlist-report]");
+  if (reportButton) return void openReport(reportButton.dataset.watchlistReport);
+  const list = currentWatchlist();
+  if (!list) return;
+  const review = event.target.closest("[data-entry-review]");
+  const remove = event.target.closest("[data-entry-remove]");
+  if (review) list.entries.find((entry) => entry.ticker === review.dataset.entryReview).lastReviewedAt = new Date().toISOString();
+  else if (remove) list.entries = list.entries.filter((entry) => entry.ticker !== remove.dataset.entryRemove);
+  else return;
+  list.updatedAt = new Date().toISOString();
+  renderWatchlists();
+  await saveWorkspace();
+});
+$("#watchlist-run-summary")?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-watchlist-report]");
+  if (button) void openReport(button.dataset.watchlistReport);
+});
+$("#save-screened-tickers")?.addEventListener("click", async () => {
+  const symbols = parseTickers($("#ticker-list").value);
+  if (!symbols.length) return setStatus("Paste tickers to add to a watchlist.", true);
+  await watchlistReady;
+  try {
+    if (!currentWatchlist()) {
+      const created = workspaceModel.addWatchlist(state.workspace, "Research list");
+      state.workspace = created.workspace;
+      state.activeWatchlistId = created.id;
+    }
+    workspaceModel.addTickers(currentWatchlist(), symbols);
+    renderWatchlists();
+    if (await saveWorkspace()) setStatus(`${symbols.length} tickers added to ${currentWatchlist().name}.`);
+  } catch (error) { setStatus(error.message, true); }
+});
+$("#watchlist-rescreen")?.addEventListener("click", async () => {
+  await watchlistReady;
+  const list = currentWatchlist();
+  if (!list?.entries.length) return setStatus("Add tickers before rescreening the list.", true);
+  const button = $("#watchlist-rescreen");
+  button.disabled = true;
+  try {
+    const symbols = list.entries.map((entry) => entry.ticker);
+    setStatus(`Rescreening ${list.name}: 0 of ${symbols.length} analyzed.`);
+    const data = await screenInBatches(symbols, (done) => setStatus(`Rescreening ${list.name}: ${done} of ${symbols.length} requested.`));
+    const rows = data.results.map((row) => ({ ...row, ...screening.evaluateCandidate(row, state.criteria).selected,
+      status: screening.evaluateCandidate(row, state.criteria).status }));
+    workspaceModel.recordRun(list, rows, state.criteria, data.failures);
+    renderWatchlists();
+    await saveWorkspace();
+    setStatus(`${list.name}: ${rows.length} analyzed, ${data.failures.length} unresolved. Changes are shown below.`);
+  } catch (error) { setStatus(`Rescreen stopped: ${error.message}`, true); }
+  finally { button.disabled = false; }
+});
+
+function openComparison(container) {
+  const rows = [...(container._compareSelected || [])].map((ticker) => container._rawResults?.find((row) => row.ticker === ticker)).filter(Boolean);
+  if (rows.length < 2 || rows.length > 5) return setStatus("Select two to five companies from the current results.", true);
+  const evaluated = rows.map((row) => ({ row, evaluation: screening.evaluateCandidate(row, state.criteria) }));
+  const metricRows = [
+    ["Decision", ({ evaluation }) => evaluation.status],
+    ["Price", ({ row }) => compact(row.price, true)],
+    ["Market cap", ({ row }) => compact(row.marketCap, true), true],
+    ["P/nFCF", ({ evaluation }) => multiple(evaluation.selected.priceToNfcf), true],
+    ["FCF yield", ({ evaluation }) => percent(evaluation.selected.fcfYield), true],
+    ["Normalized FCF", ({ evaluation }) => compact(evaluation.selected.normalizedFcf, true), true],
+    ["Net debt/nFCF", ({ evaluation }) => multiple(evaluation.selected.netDebtToNfcf), true],
+    ["Usable years", ({ row }) => row.usableYears ?? "—", true],
+    ["Evidence confidence", ({ row }) => row.evidenceConfidence?.level || "Unknown"],
+    ["Quote currency", ({ row }) => row.quoteCurrency || "Unavailable"],
+    ["Price as of", ({ row }) => row.marketDataAsOf ? new Date(row.marketDataAsOf).toLocaleString() : "Unavailable"],
+    ["Financial period", ({ row }) => row.financialPeriodEnd || "Unavailable"],
+    ["Why not Idea", ({ evaluation }) => evaluation.reasons?.join("; ") || "All active checks passed"]
+  ];
+  $("#compare-content").innerHTML = `<p class="muted compare-criteria">${escapeHtml(state.criteria.name || "Custom")} criteria · ${escapeHtml(screening.lookbackKey(state.criteria))} lookback · Missing and partial-confidence values are marked.</p><table class="comparison-table"><thead><tr><th>Metric</th>${evaluated.map(({ row }) => `<th><button type="button" class="text-link" data-compare-report="${escapeHtml(row.ticker)}">${escapeHtml(row.ticker)}</button><small>${escapeHtml(row.companyName || "")}</small></th>`).join("")}</tr></thead><tbody>${metricRows.map(([label, getter, needsEvidence]) => `<tr><th scope="row">${escapeHtml(label)}</th>${evaluated.map((item) => {
+    const value = getter(item);
+    const confidence = item.row.evidenceConfidence?.level || "Unknown";
+    const note = value === "—" || value === "Unavailable" ? "Missing" : needsEvidence && ["Partial", "Unsafe", "Unknown"].includes(confidence) ? `${confidence} evidence` : "";
+    return `<td>${escapeHtml(value)}${note ? `<small class="comparison-note">${escapeHtml(note)}</small>` : ""}</td>`;
+  }).join("")}</tr>`).join("")}</tbody></table>`;
+  $("#compare-modal")._returnFocus = container.querySelector(".compare-button");
+  $("#compare-modal").classList.remove("hidden");
+  $("#compare-close").focus();
+}
+function closeComparison() {
+  $("#compare-modal").classList.add("hidden");
+  $("#compare-modal")._returnFocus?.focus();
+}
+$("#compare-close")?.addEventListener("click", closeComparison);
+$("#compare-backdrop")?.addEventListener("click", closeComparison);
+$("#compare-content")?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-compare-report]");
+  if (button) { closeComparison(); void openReport(button.dataset.compareReport); }
+});
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("#compare-modal")?.classList.contains("hidden")) closeComparison();
+});
+
+function readDcfModels() {
+  const models = {};
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key?.startsWith("clearfcf-financial-analysis-v2:")) models[key] = JSON.parse(localStorage.getItem(key));
+  }
+  return models;
+}
+function downloadWorkspace(value) {
+  const body = JSON.stringify(value, null, 2);
+  const file = new Blob([body], { type: "application/json" });
+  if (file.size > MAX_BACKUP_BYTES) throw new Error("Workspace backup exceeds the 100 MB file limit.");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(file);
+  link.download = `clearfcf-workspace-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  return file.size;
+}
+$("#workspace-export")?.addEventListener("click", async () => {
+  await watchlistReady;
+  try {
+    await Promise.all([scanWriteQueue.catch(() => {}), watchlistWriteQueue.catch(() => {})]);
+    const backup = workspaceModel.validateBackup({ format: "clearfcf-workspace", version: workspaceModel.VERSION,
+      exportedAt: new Date().toISOString(), workspace: state.workspace, scan: await workspaceStorage.get(STORAGE_KEY),
+      researchReports: state.researchReports, dcfModels: readDcfModels(),
+      dcfDefaults: JSON.parse(localStorage.getItem("clearfcf-wacc-defaults-v1") || "null") });
+    const bytes = downloadWorkspace(backup);
+    setStatus(`Workspace backup downloaded (${(bytes / 1024 / 1024).toFixed(2)} MB). Keep the file somewhere you control.`);
+  } catch (error) { setStatus(`Workspace export failed: ${error.message}`, true); }
+});
+$("#workspace-import")?.addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  await watchlistReady;
+  if (file.size > MAX_BACKUP_BYTES) return setStatus("Workspace file exceeds the 100 MB import limit.", true);
+  if ($("#progress-wrap")?.classList.contains("is-running")) return setStatus("Stop the current scan before importing a workspace.", true);
+  try {
+    const incoming = workspaceModel.validateBackup(JSON.parse(await file.text()));
+    if (incoming.scan) scanState.normalize(incoming.scan);
+    const replace = $("#workspace-import-mode").value === "replace";
+    if (replace && !window.confirm("Replace your current watchlists, scan, research reports, and DCF models with this backup?")) return;
+    const nextWorkspace = replace ? incoming.workspace : workspaceModel.merge(state.workspace, incoming.workspace);
+    const existingModels = readDcfModels();
+    const nextModels = replace ? incoming.dcfModels : { ...incoming.dcfModels, ...existingModels };
+    const nextResearch = replace ? incoming.researchReports : { ...incoming.researchReports, ...state.researchReports };
+    await workspaceStorage.set(WORKSPACE_KEY, nextWorkspace);
+    if (replace && !incoming.scan) await workspaceStorage.remove(STORAGE_KEY);
+    else if (replace || !state.auto) if (incoming.scan) await workspaceStorage.set(STORAGE_KEY, incoming.scan);
+    await workspaceStorage.set(RESEARCH_STORAGE_KEY, nextResearch);
+    for (const key of Object.keys(existingModels)) if (replace && !Object.hasOwn(nextModels, key)) localStorage.removeItem(key);
+    for (const [key, value] of Object.entries(nextModels)) localStorage.setItem(key, JSON.stringify(value));
+    if (incoming.dcfDefaults) localStorage.setItem("clearfcf-wacc-defaults-v1", JSON.stringify(incoming.dcfDefaults));
+    else if (replace) localStorage.removeItem("clearfcf-wacc-defaults-v1");
+    state.workspace = nextWorkspace;
+    state.activeWatchlistId = nextWorkspace.watchlists[0]?.id || null;
+    state.researchReports = nextResearch;
+    if (replace || !state.auto) state.auto = incoming.scan ? scanState.normalize(incoming.scan) : null;
+    if (state.auto) {
+      if (state.auto.criteria) {
+        state.criteria = { ...PRESETS.default, ...state.auto.criteria,
+          maxMarketCap: state.auto.criteria.maxMarketCap == null ? Infinity : state.auto.criteria.maxMarketCap };
+        state.activePreset = state.auto.activePreset || "custom";
+        syncCriteriaControls(state.criteria, state.activePreset);
+      }
+      state.auto.results = state.auto.allExamined.filter((row) => evaluateReportStatus(row, state.criteria) === "Idea");
+      updateAutoUi();
+      $("#find-button").textContent = state.auto.complete ? "Start new scan" : "Resume scan";
+      scanSaveMessage("Saved locally");
+    } else {
+      $("#progress-wrap").classList.add("hidden");
+      $("#idea-results").innerHTML = initialIdeaEmptyHtml();
+      $("#find-button").textContent = "Start scan";
+      scanSaveMessage("Not yet saved");
+    }
+    renderWatchlists();
+    $("#workspace-save-state").textContent = "Saved locally";
+    setStatus(`Workspace imported: ${nextWorkspace.watchlists.length} watchlists and ${Object.keys(nextModels).length} DCF models.`);
+  } catch (error) { setStatus(`Workspace import failed: ${error.message}`, true); }
 });

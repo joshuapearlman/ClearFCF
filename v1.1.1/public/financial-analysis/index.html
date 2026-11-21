@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f5f3ee">
   <title>ClearFCF Financial Deep Analysis</title>
   <link rel="icon" href="/icon-mark.png">
-  <link rel="stylesheet" href="/financial-analysis/styles.css?v=5">
+  <link rel="stylesheet" href="/financial-analysis/styles.css?v=6">
 </head>
 <body>
   <header class="topbar">
@@ -46,6 +46,7 @@
         <button data-case="base" class="active" type="button">Base</button>
         <button data-case="bull" type="button">Bull</button>
       </nav>
+      <div class="valuation-export"><span>Review the WACC assumptions before saving a forecast or exporting a valuation.</span><button id="export-model-json" type="button" class="secondary">Export model JSON</button><button id="print-valuation" type="button" class="secondary">Save valuation PDF</button></div>
 
       <section id="history" class="section-head" data-collapse-id="history" data-collapse-targets="#trend-table"><div><span>01</span><div><p class="eyebrow">Performance history</p><h2>Growth, changes, and margins</h2></div></div><p>Reported values and calculated year-over-year changes reveal the operating pattern behind the forecast.</p></section>
       <section id="trend-table" class="panel table-panel"></section>
@@ -96,7 +97,8 @@
       <section id="snapshot-card" class="panel"></section>
     </div>
   </main>
+  <section id="valuation-print-report" class="hidden" aria-label="Printable valuation report"></section>
   <script src="/financial-analysis/engine.js?v=5"></script>
-  <script src="/financial-analysis/app.js?v=6"></script>
+  <script src="/financial-analysis/app.js?v=7"></script>
 </body>
 </html>
